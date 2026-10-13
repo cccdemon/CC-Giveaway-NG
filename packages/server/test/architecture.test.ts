@@ -28,6 +28,12 @@ describe('Modulgrenzen (NEW_DESIGN.md 3.4)', () => {
   it('kernel darf kernel-api und eigene Dateien importieren', async () => {
     expect(await restricted('src/kernels/demo/index.ts', "import type { X } from '../../kernel-api/index.js';\nimport { h } from './helper.js';\nexport const y: X | undefined = h;\n")).toBe(false);
   });
+  it('kernel darf kein fremdes kernel-api-Segment über Pfad erreichen', async () => {
+    expect(await restricted('src/kernels/demo/index.ts', "import { x } from '../x/kernel-api/index.js';\nexport const y = x;\n")).toBe(true);
+  });
+  it('kernel darf kein Modul namens kernel-api über Pfad erreichen', async () => {
+    expect(await restricted('src/kernels/demo/index.ts', "import { x } from '../journal/kernel-api.js';\nexport const y = x;\n")).toBe(true);
+  });
   it('kernel-api importiert nichts aus src', async () => {
     expect(await restricted('src/kernel-api/index.ts', "import { x } from '../journal/types.js';\nexport const y = x;\n")).toBe(true);
   });

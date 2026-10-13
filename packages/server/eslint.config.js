@@ -10,7 +10,7 @@ export default tseslint.config(
     rules: {
       'no-restricted-imports': ['error', {
         patterns: [
-          { regex: '^\.\./', message: 'kernel-api enthält nur Typen und importiert nichts aus src.' },
+          { regex: '^\\.\\./', message: 'kernel-api enthält nur Typen und importiert nichts aus src.' },
           { regex: NODE_AND_IO, message: 'kernel-api enthält nur Typen und importiert keine Bibliotheken für I/O.' },
         ],
       }],
@@ -21,7 +21,7 @@ export default tseslint.config(
     rules: {
       'no-restricted-imports': ['error', {
         patterns: [
-          { regex: '^\.\./(?!\.\./kernel-api(/|$))', message: 'Ein Kern importiert nur kernel-api (NEW_DESIGN.md 3.4).' },
+          { regex: '^\\.\\./(?!\\.\\./kernel-api(/|$))', message: 'Ein Kern importiert nur kernel-api (NEW_DESIGN.md 3.4).' },
           { regex: NODE_AND_IO, message: 'Ein Kern ist rein und nutzt kein I/O (NEW_DESIGN.md 4).' },
         ],
       }],
