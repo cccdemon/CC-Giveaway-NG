@@ -1,3 +1,5 @@
+import type pg from 'pg';
+import type { Projector } from '../../src/framework/projections.js';
 import { z } from 'zod';
 import { EventTypeRegistry } from '../../src/journal/event-types.js';
 import type { EventRecord } from '../../src/journal/types.js';
@@ -56,3 +58,18 @@ export function testRegistry(): EventTypeRegistry {
 export function rejectNegative(state: CounterState, by: number) {
   return state.total < by ? reject('would_go_negative', 'Der Zähler würde negativ. Nimm zuerst die späteren Einträge zurück.') : null;
 }
+
+export const totalsProjector: Projector = {
+  name: 'totals',
+  handles: ['counter_incremented', 'counter_decremented'],
+  async apply(c: pg.PoolClient, e: EventRecord) {
+    const by = (e.payload as { by: number }).by * (e.type === 'counter_incremented' ? 1 : -1);
+    await c.query(
+      'INSERT INTO test_totals (stream, total) VALUES ($1, $2) ON CONFLICT (stream) DO UPDATE SET total = test_totals.total + $2',
+      [e.stream, by],
+    );
+  },
+  async reset(c: pg.PoolClient) {
+    await c.query('DELETE FROM test_totals');
+  },
+};
