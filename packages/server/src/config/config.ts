@@ -1,11 +1,13 @@
 import { z } from 'zod';
 
+const ZAHL_MSG = 'Erlaubt ist eine ganze Zahl von 1 bis 65535.';
+
 const schema = z.object({
-  NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+  NODE_ENV: z.enum(['development', 'test', 'production'], { message: 'Erlaubt sind: development, test, production.' }).default('development'),
   DATABASE_URL: z.string({ message: 'Pflichtwert fehlt.' }).url({ message: 'Keine gültige URL.' }),
   REDIS_URL: z.string({ message: 'Pflichtwert fehlt.' }).url({ message: 'Keine gültige URL.' }),
-  PORT: z.coerce.number({ message: 'Keine Zahl.' }).int().min(1).max(65535).default(3000),
-  LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
+  PORT: z.coerce.number({ message: 'Keine Zahl.' }).int({ message: ZAHL_MSG }).min(1, { message: ZAHL_MSG }).max(65535, { message: ZAHL_MSG }).default(3000),
+  LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace'], { message: 'Erlaubt sind: fatal, error, warn, info, debug, trace.' }).default('info'),
 });
 
 export interface Config {
