@@ -18,6 +18,9 @@ export async function ensurePartitions(pool: pg.Pool, now: Date, monthsAhead = 2
       await c.query(
         `CREATE TABLE IF NOT EXISTS ${name} PARTITION OF events FOR VALUES FROM ('${start.toISOString()}') TO ('${end.toISOString()}')`,
       );
+      await c.query(
+        `CREATE OR REPLACE TRIGGER events_no_truncate BEFORE TRUNCATE ON ${name} FOR EACH STATEMENT EXECUTE FUNCTION events_append_only()`,
+      );
       names.push(name);
     }
     return names;
@@ -25,6 +28,6 @@ export async function ensurePartitions(pool: pg.Pool, now: Date, monthsAhead = 2
 }
 
 export function isMissingPartition(e: unknown): boolean {
-  const err = e as { code?: string; message?: string };
-  return err?.code === '23514' && /no partition of relation/.test(err.message ?? '');
+  const err = e as { code?: string; message?: string; table?: string };
+  return err?.code === '23514' && (err.table === 'events' || /no partition of relation/.test(err.message ?? ''));
 }

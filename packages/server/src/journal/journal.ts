@@ -1,7 +1,7 @@
 import type pg from 'pg';
 import type { Queryable } from '../db/pool.js';
 import type { EventTypeRegistry } from './event-types.js';
-import { assertActor, assertStreamId, type Actor, type EventId, type EventRecord, type NewEvent, type StreamId } from './types.js';
+import { assertActor, assertStreamId, JournalError, type Actor, type EventId, type EventRecord, type NewEvent, type StreamId } from './types.js';
 
 export interface AppendArgs {
   stream: StreamId;
@@ -56,10 +56,19 @@ export async function lockStream(c: pg.PoolClient, stream: StreamId): Promise<nu
 export async function appendLocked(c: pg.PoolClient, registry: EventTypeRegistry, a: AppendArgs): Promise<EventRecord[]> {
   assertActor(a.actor);
   if (a.events.length === 0) return [];
+  const prepared = a.events.map((e) => registry.prepare(e));
+  const head = await c.query('UPDATE stream_heads SET last_seq = $2 WHERE stream = $1 AND last_seq = $3', [
+    a.stream, a.lastSeq + prepared.length, a.lastSeq,
+  ]);
+  if (head.rowCount !== 1) {
+    throw new JournalError(
+      'seq_conflict',
+      `Der Strom ${a.stream} hat sich geaendert oder wurde nicht gesperrt (erwartete letzte seq ${a.lastSeq}). Strom mit lockStream sperren und die Aktion erneut ausfuehren.`,
+    );
+  }
   const out: EventRecord[] = [];
   let seq = a.lastSeq;
-  for (const e of a.events) {
-    const p = registry.prepare(e);
+  for (const p of prepared) {
     seq += 1;
     const r = await c.query<{ id: string }>(
       `INSERT INTO events (stream, seq, type, type_version, payload, actor, reason, reverses_event_id, correlation_id, created_at)
@@ -71,7 +80,6 @@ export async function appendLocked(c: pg.PoolClient, registry: EventTypeRegistry
       actor: a.actor, reason: p.reason, reversesEventId: p.reversesEventId, correlationId: a.correlationId, createdAt: a.at,
     });
   }
-  await c.query('UPDATE stream_heads SET last_seq = $2 WHERE stream = $1', [a.stream, seq]);
   return out;
 }
 
