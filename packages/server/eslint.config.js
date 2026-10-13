@@ -1,6 +1,6 @@
 import tseslint from 'typescript-eslint';
 
-const NODE_AND_IO = '^(pg|ioredis|fastify|node:.*|fs|net|http|https|crypto|child_process)$';
+const NODE_AND_IO = '^(pg|ioredis|fastify|node:.*|fs|net|http|https|crypto|child_process)(/.*)?$';
 
 export default tseslint.config(
   { ignores: ['dist/**'] },

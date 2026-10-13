@@ -34,6 +34,15 @@ describe('Modulgrenzen (NEW_DESIGN.md 3.4)', () => {
   it('kernel darf kein Modul namens kernel-api über Pfad erreichen', async () => {
     expect(await restricted('src/kernels/demo/index.ts', "import { x } from '../journal/kernel-api.js';\nexport const y = x;\n")).toBe(true);
   });
+  it('kernel darf keine I/O-Unterpfade wie fs/promises importieren', async () => {
+    expect(await restricted('src/kernels/demo/index.ts', "import fs from 'fs/promises';\nexport const y = fs;\n")).toBe(true);
+  });
+  it('kernel-api darf keine I/O-Unterpfade wie fs/promises importieren', async () => {
+    expect(await restricted('src/kernel-api/index.ts', "import fs from 'fs/promises';\nexport const y = fs;\n")).toBe(true);
+  });
+  it('kernel darf keine Unterpfade von pg importieren', async () => {
+    expect(await restricted('src/kernels/demo/index.ts', "import x from 'pg/lib/client';\nexport const y = x;\n")).toBe(true);
+  });
   it('kernel-api importiert nichts aus src', async () => {
     expect(await restricted('src/kernel-api/index.ts', "import { x } from '../journal/types.js';\nexport const y = x;\n")).toBe(true);
   });
