@@ -1,6 +1,6 @@
-import type pg from 'pg';
+import pg from 'pg';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { CommandBus, type CommandBusDeps } from '../src/framework/command-bus.js';
+import { CommandBus, type CommandBusDeps, type CommandHandler } from '../src/framework/command-bus.js';
 import { ProjectionRegistry } from '../src/framework/projections.js';
 import { InMemoryPublisher, type Publisher } from '../src/framework/publisher.js';
 import { readStream } from '../src/journal/journal.js';
@@ -20,7 +20,7 @@ async function setup(over: Partial<CommandBusDeps> = {}) {
   const publisher = new InMemoryPublisher();
   const log = { error: vi.fn() };
   const bus = new CommandBus({ pool: db.pool, registry, projections, publisher, log, ...over });
-  return { pool: db.pool, bus, publisher, log, projections };
+  return { pool: db.pool, url: db.url, bus, publisher, log, projections };
 }
 
 const total = async (pool: pg.Pool) => (await pool.query('SELECT total FROM test_totals WHERE stream = $1', [STREAM])).rows[0]?.total ?? 0;
@@ -113,5 +113,65 @@ describe('CommandBus', () => {
     const { bus } = await setup();
     const res = await bus.execute(incrementHandler, { stream: STREAM, by: 1 }, ctx());
     expect(res.ok && res.events[0]!.createdAt).toEqual(AT);
+  });
+
+  const bumpingHandler = (times: number, calls: { n: number }): CommandHandler<{ stream: string; by: number }, { total: number }> => ({
+    ...incrementHandler,
+    prepare: async (c, cmd) => {
+      calls.n += 1;
+      if (calls.n <= times) await c.query('UPDATE stream_heads SET last_seq = last_seq + 1 WHERE stream = $1', [cmd.stream]);
+      return undefined;
+    },
+  });
+
+  it('retries once on seq conflict', async () => {
+    const { pool, bus } = await setup();
+    await bus.execute(incrementHandler, { stream: STREAM, by: 1 }, ctx());
+    const calls = { n: 0 };
+    const res = await bus.execute(bumpingHandler(1, calls), { stream: STREAM, by: 1 }, ctx());
+    expect(res.ok).toBe(true);
+    expect(calls.n).toBe(2);
+    if (res.ok) expect(res.events.map((e) => e.seq)).toEqual([2]);
+    expect(await total(pool)).toBe(2);
+  });
+
+  it('propagates a persistent seq conflict after exactly two attempts', async () => {
+    const { bus, publisher } = await setup();
+    await bus.execute(incrementHandler, { stream: STREAM, by: 1 }, ctx());
+    const calls = { n: 0 };
+    await expect(bus.execute(bumpingHandler(99, calls), { stream: STREAM, by: 1 }, ctx())).rejects.toMatchObject({ code: 'seq_conflict' });
+    expect(calls.n).toBe(2);
+    expect(publisher.messages).toHaveLength(1);
+  });
+
+  it('still returns the rejection when logging the denial fails', async () => {
+    const { pool, bus, log } = await setup();
+    await pool.query('DROP TABLE access_log');
+    const res = await bus.execute(incrementHandler, { stream: STREAM, by: 1, deny: true }, ctx());
+    expect(res).toMatchObject({ ok: false, rejection: { code: 'forbidden' } });
+    expect(log.error).toHaveBeenCalledOnce();
+  });
+
+  it('does not publish when decide returns no events', async () => {
+    const { bus, publisher } = await setup();
+    const noop: CommandHandler<{ stream: string }, { total: number }> = { ...incrementHandler, decide: () => [] };
+    const res = await bus.execute(noop, { stream: STREAM }, ctx());
+    expect(res).toEqual({ ok: true, events: [] });
+    expect(publisher.messages).toEqual([]);
+  });
+
+  it('two bus instances with own pools keep seq gapless', async () => {
+    const { pool, url, bus, publisher, projections, log } = await setup();
+    const pool2 = new pg.Pool({ connectionString: url, max: 30 });
+    try {
+      const bus2 = new CommandBus({ pool: pool2, registry, projections, publisher, log });
+      const run = (b: CommandBus) => Array.from({ length: 10 }, () => b.execute(incrementHandler, { stream: STREAM, by: 1 }, ctx()));
+      const results = await Promise.all([...run(bus), ...run(bus2)]);
+      expect(results.every((r) => r.ok)).toBe(true);
+      expect((await readStream(pool, registry, STREAM)).map((e) => e.seq)).toEqual(Array.from({ length: 20 }, (_, i) => i + 1));
+      expect(await total(pool)).toBe(20);
+    } finally {
+      await pool2.end();
+    }
   });
 });

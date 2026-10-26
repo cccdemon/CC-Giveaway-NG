@@ -5,7 +5,7 @@ import type { EventTypeRegistry } from '../journal/event-types.js';
 import { appendLocked, lockStream, readStream } from '../journal/journal.js';
 import { ensurePartitions, isMissingPartition } from '../journal/partitions.js';
 import { loadSnapshot, saveSnapshot } from '../journal/snapshots.js';
-import type { Actor, EventRecord, NewEvent, StreamId } from '../journal/types.js';
+import { JournalError, type Actor, type EventRecord, type NewEvent, type StreamId } from '../journal/types.js';
 import { isRejection, type Rejection } from '../shared/rejection.js';
 import type { ProjectionRegistry } from './projections.js';
 import type { Publisher } from './publisher.js';
@@ -63,14 +63,14 @@ export class CommandBus {
       try {
         const out = await withTx(this.d.pool, (c) => this.runOnce(h, cmd, ctx, c));
         if (isRejection(out)) return this.deny(h, cmd, ctx, out);
-        await this.publishSafe(h.streamOf(cmd), out);
+        if (out.length > 0) await this.publishSafe(h.streamOf(cmd), out);
         return { ok: true, events: out };
       } catch (e) {
         if (attempt === 0 && isMissingPartition(e)) {
           await ensurePartitions(this.d.pool, ctx.now, 2);
           continue;
         }
-        if (attempt === 0 && RETRYABLE_SQLSTATE.has((e as { code?: string }).code ?? '')) continue;
+        if (attempt === 0 && (RETRYABLE_SQLSTATE.has((e as { code?: string }).code ?? '') || (e instanceof JournalError && e.code === 'seq_conflict'))) continue;
         throw e;
       }
     }
@@ -113,7 +113,11 @@ export class CommandBus {
     } catch {
       target = null;
     }
-    await logDenied(this.d.pool, { actor: ctx.actor, action: h.type, reason: rejection.code, target, ip: ctx.ip ?? null, at: ctx.now });
+    try {
+      await logDenied(this.d.pool, { actor: ctx.actor, action: h.type, reason: rejection.code, target, ip: ctx.ip ?? null, at: ctx.now });
+    } catch (err) {
+      this.d.log.error({ err, action: h.type, target }, 'Die Ablehnung konnte nicht protokolliert werden. Der Grund wird trotzdem gemeldet.');
+    }
     return { ok: false, rejection };
   }
 
