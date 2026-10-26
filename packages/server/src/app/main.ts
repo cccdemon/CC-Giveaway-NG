@@ -11,6 +11,19 @@ async function main() {
   await ensurePartitions(pool, new Date(), 2);
   const app = buildApp({ pool }, { logger: { level: config.logLevel } });
   await app.listen({ host: '0.0.0.0', port: config.port });
+
+  const shutdown = (signal: string) => {
+    app.log.info({ signal }, 'Der Prozess fährt herunter.');
+    app
+      .close()
+      .then(() => process.exit(0))
+      .catch((e: unknown) => {
+        app.log.error({ err: e }, 'Das Herunterfahren ist fehlgeschlagen.');
+        process.exit(1);
+      });
+  };
+  process.once('SIGTERM', () => shutdown('SIGTERM'));
+  process.once('SIGINT', () => shutdown('SIGINT'));
 }
 
 main().catch((e) => {
