@@ -1,6 +1,6 @@
 # CC-Giveaway Neubau – Design-Spec
 
-Stand: 12.10.2026 · Status: Entwurf zur Freigabe
+Stand: 26.10.2026 · Status: Entwurf zur Freigabe (Abschnitt 15 vom Betreiber freigegeben)
 UI-Vorschau: https://claude.ai/artifact/WPjkheR8tnCiSxodod7rMx (privat)
 
 Dieses Dokument beschreibt das neue Giveaway-System. Es löst CC-Giveaway vollständig ab.
@@ -36,7 +36,7 @@ Ziehung, Status, Datenschutz, Oberflächen.
 - Keine Abo-, VIP- oder Kauf-Regeln. Sie sind glücksspielrechtlich heikel.
 - Keine Speicherung von Gewinner-Anschriften.
 - Keine OBS-Overlays.
-- Kein Import von Altdaten.
+- Kein Import abgeschlossener Altdaten (Ziehungen, Audit, Gewinnermeldungen). Laufende Viewtime-Kampagnen werden übernommen, siehe 15.
 
 ---
 
@@ -596,10 +596,11 @@ Löschen heißt: Die Zeile in `identities` wird entfernt. Das Journal zeigt dana
 ### 12.5 Ablösung des Altsystems
 
 - Neues Repository, Neubau. Kein Code wird übernommen. Kern-Testfälle des Altsystems dienen als Referenz.
-- Parallelbetrieb: Das Altsystem führt laufende Giveaways zu Ende. Neue Giveaways starten nur im Neubau.
+- Harter Schnitt an einem Stichtag. Kein Parallelbetrieb. Das Altsystem wird gestoppt, laufende
+  Viewtime-Kampagnen wandern per Übernahme-Werkzeug in den Neubau (Abschnitt 15).
 - Danach wird das Altsystem nur noch lesbar. Ziehungsnachweise und Audit gehen als tar.gz ins Archiv.
 - DSGVO-Anfragen zu Altdaten bedient das Altsystem bis zum Ende der Aufbewahrungsfrist.
-- Kein Datenimport.
+- Kein Import abgeschlossener Daten (Ziehungen, Audit, Gewinnermeldungen, Guthaben).
 
 ---
 
@@ -618,8 +619,10 @@ Löschen heißt: Die Zeile in `identities` wird entfernt. Das Journal zeigt dana
 | 9 | Zählweise der Zuschauzeit | Pro Giveaway wählbar: ab Anmeldung oder ab erstem Erscheinen |
 | 10 | Geldbörse Kern C | Pro Giveaway, nicht team-weit |
 | 11 | Mustertexte Recht | Keine, nur Checkliste |
-| 12 | Altdaten | Archiv, kein Import |
+| 12 | Altdaten | Abgeschlossenes ins Archiv. Laufende Viewtime-Kampagnen werden übernommen (geändert 26.10.2026, siehe 15) |
 | 13 | Spec-Ort | `NEW_DESIGN.md` im Repo CC-Giveaway-NG, Pflichtverweis in beiden `CLAUDE.md` |
+| 14 | Übernahme laufender Giveaways | Harter Schnitt, kein Parallelbetrieb. Nur Kern A (Viewtime). Wiederverwendbares Werkzeug im Neubau, kein Einmal-Skript. Entscheidung 26.10.2026 |
+| 15 | Zustimmung übernommener Anmeldungen | Bleibt gültig, auch wenn der Streamer beim Fortsetzen neue Rechtstexte hinterlegt. Entscheidung 26.10.2026 |
 
 ---
 
@@ -635,4 +638,156 @@ Jedes Teilprojekt bekommt einen eigenen Umsetzungsplan.
 6. **Kern C:** Geldbörse, Ticket-Befehle.
 7. **Teams.**
 8. **Oberflächen:** Streamer-App, Teilnehmer-Portal, Plattform-Verwaltung. Teile davon wachsen ab Teilprojekt 2 mit.
-9. **Lasttest, Betrieb, Ablösung.**
+9. **Übernahme des Altbestands:** Export v2 im Altsystem, Werkzeug `migrate-legacy` im Neubau (Abschnitt 15). Braucht 3, 5 und 7.
+10. **Lasttest, Betrieb, Ablösung.**
+
+---
+
+## 15. Übernahme des Altbestands
+
+Stand: 26.10.2026. Ergänzt 12.5. Bei Widerspruch gilt dieser Abschnitt.
+
+### 15.1 Absicht
+
+Am Stichtag stoppt das Altsystem. Laufende Viewtime-Kampagnen laufen im Neubau weiter.
+Teilnehmer behalten Zuschauzeit, Chat-Bonus, Anmeldung und Bann. Es gibt keinen Parallelbetrieb.
+
+Warum: Kampagnen laufen Wochen. Zuschauer sammeln in dieser Zeit. Ein Verlust der Zeit
+bricht das Vertrauen der Zuschauer. Das wiegt schwerer als der Aufwand für das Werkzeug.
+
+Belegt am 26.10.2026 auf Prod: eine echte Kampagne (`!werwolf`, 38 Zuschauer mit Zeit,
+33 h, 12 Anmeldungen), zwei Testkampagnen, Rest Tests oder erledigt. Die Summen in
+`watchtime_events` (PG) stimmen sekundengenau mit dem Live-Stand in Redis überein.
+
+### 15.2 Ziele, Nicht-Ziele, Anti-Ziele
+
+Ziele:
+
+1. Jede am Stichtag laufende oder pausierte Viewtime-Kampagne (`CORE_WatchtimeChatActivity`)
+   existiert danach im Neubau mit denselben Sekunden je Teilnehmer und Kanal.
+2. Das Werkzeug ist wiederverwendbar: beliebiges Team, beliebig viele Kampagnen, mehrfach
+   ausführbar ohne Doppelung.
+3. Jeder Lauf erzeugt einen Bericht. Nichts geht still verloren.
+
+Nicht-Ziele:
+
+- Los-Giveaways (`CORE_TicketBuy`), Sofortverlosungen, Contest, Guthaben (`credit_ledger`).
+- Ziehungen, Audit-Log, Gewinnermeldungen, Kontaktdaten. Sie bleiben im Archiv des Altsystems.
+- Boosts. Sie enden mit dem Stopp des Altsystems.
+- Twitch-Tokens der Streamer. Die neuen Scopes gibt es nur durch neue Anmeldung.
+
+Anti-Ziele (Fehlschlag, auch wenn es technisch läuft):
+
+- Eine Sekunde zählt doppelt oder fehlt, ohne dass der Bericht es nennt.
+- Ein Twitch-Login oder eine Twitch-ID landet im Journal.
+- Ein zweiter Schreibweg am `CommandBus` vorbei.
+
+### 15.3 Umfang je Objekt
+
+| Objekt | Quelle im Altsystem | Ziel im Neubau |
+|---|---|---|
+| Team | `teams`, `team_members`, `streamers.twitch_id` | Strom `team:<id>`: Team angelegt, Mitglied je Streamer (über `twitch_id` → `pid`), Kanal je Mitglied ohne Verbindung. Ein-Personen-Team wird auf das Solo-Team des Streamers abgebildet, Mehrpersonen-Team wird als Team angelegt |
+| Giveaway | `sessions` mit `core = CORE_WatchtimeChatActivity` und `closed_at IS NULL` (= nicht gezogen), Redis `g:<sid>:open/paused/keyword/channels` | Strom `giveaway:<id>`: Ereignis `legacy_imported`. Zustand danach: Redis `open=true` → **Pausiert**, `open=false` → **Geschlossen** (Topf eingefroren, nur Ziehung oder Wiederöffnen) |
+| Gewinn, Sponsor | `sessions.prize`, `sessions.sponsor` | Felder des Giveaways |
+| Regeln | Redis `g:<sid>:cfg:*` (`coin_base_sec`, `follow_min`, `chat_enabled`, `chat_bonus_sec`, `chat_min_words`, `chat_cooldown`) | Coin-Basis, Bedingung Follow „mindestens N Kanälen“, Chat-Bonus. `auto_pause`/`auto_resume` entfallen |
+| Zählweise | Altsystem zählt alle Anwesenden | „Ab erstem Erscheinen“, Unangemeldete tragen die Markierung „unangemeldet“ |
+| Teilnehmer | Redis `g:<sid>:ch:<kanal>:watch:<login>`, geprüft gegen `SUM(watchtime_events.delta_sec)` je Kanal | `identities` je Login, Eintrag `{pid, kanal, sek}` im `legacy_imported`. Der Chat-Bonus steckt im Altsystem schon in `watch`, eine Trennung gibt es nicht. Der Nachrichtenzähler `msgs` wird nicht übernommen, der Neubau hat keinen |
+| Kanal | `sessions.channels`, `team_members.channel` (Twitch-Login, kann vom Login des Mitglieds abweichen) | `kanal` = `pid` des Kanal-Inhabers, per Helix aufgelöst wie Teilnehmer. Kanal ohne Mitglied im Team (Austritt, Kanalwechsel) wird importiert und als „inaktiv“ markiert, der Bericht nennt ihn |
+| Anmeldung | Redis `g:<sid>:registered:<login>` | Markierung „angemeldet“ im Eintrag, mit der Fassung aus `sessions.terms_version` |
+| Bann | Redis `gw_banned:<login>` (team-weit) | Ereignis „gebannt“ im Strom `team:<id>` je Person. Bann ist im Neubau team-weit wie im Altsystem (Festlegung 26.10.2026) |
+| Teilnahmebedingungen | `terms_versions.terms` zu `sessions.terms_version` | eingefrorener Text des Giveaways. Version 0 = kein Text |
+
+Nicht übernommen: Nachrichtenzähler, Chat-Cooldown-Zeitstempel, Presence/LastTick, Follow-Cache, Abuse-Flags, `users`-Gesamtzähler.
+
+### 15.4 Ablauf am Stichtag
+
+1. Betreiber stoppt `cc-bridge` im Altsystem. Ab jetzt bucht kein Tick mehr.
+2. Betreiber ruft als Superadmin je Team den Export v2 des Altsystems auf (15.5). Ergebnis: eine Datei je Team.
+3. Betreiber stoppt das Altsystem vollständig.
+4. Betreiber führt im Neubau je Datei `migrate-legacy --dry-run` aus und liest den Bericht.
+5. Betreiber führt `migrate-legacy` aus.
+6. Jeder Streamer meldet sich im Neubau an, verbindet seinen Kanal, hinterlegt Rechtstexte
+   (9.4) und setzt das Giveaway fort. Vorher bleibt es Pausiert.
+
+Schritt 6 ist bewusst: Ohne Rechtstexte öffnet kein Giveaway (9.4). Die Übernahme umgeht
+das nicht, sie parkt das Giveaway in „Pausiert“. Der Teilnehmer sieht es im Portal ab Schritt 5.
+
+Übernommene Anmeldungen bleiben gültig (Betreiber 26.10.2026). Die Zustimmung zur alten
+Fassung steht am Eintrag. Hinterlegt der Streamer beim Fortsetzen neue Rechtstexte, muss
+niemand neu zustimmen. Das Portal zeigt dem Teilnehmer die Fassung, der er zugestimmt hat.
+
+### 15.5 Export v2 im Altsystem
+
+Das Altsystem bekommt eine letzte Änderung: `exportTeam` liefert zusätzlich **alle**
+Viewtime-Instanzen des Teams (heute nur die Primär-Kampagne). Format `cc-giveaway-backup`,
+`version: 2`, je Instanz: `sessionId`, `name`, `keyword`, `channels`, `open`, `paused`, `cfg`,
+`prize`, `sponsor`, `termsVersion`, `termsText`, `participants[{login, registered,
+perChannel{watchSec}}]`, `pgWatchSum` je Kanal als Kontrollsumme aus `watchtime_events`.
+Zusätzlich `team{id, name, members[{login, twitchId, channel}], banned[login]}`.
+
+Der Export ist Lesezugriff. Er ändert im Altsystem nichts. Er bleibt auditiert (`export`).
+`GET /api/export` erlaubt zusätzlich dem Superadmin jedes Team (heute nur Owner), damit der
+Betreiber den Stichtag allein fahren kann.
+
+Vor dem Schreiben prüft der Export je Kanal: Summe `watchSec` aus Redis = `pgWatchSum`.
+Weicht es ab, bricht der Export ab und nennt Kanal und Differenz.
+
+### 15.6 Werkzeug `migrate-legacy` im Neubau
+
+- Modul `packages/server/src/migration/legacy/`, CLI `npm run migrate-legacy -- --file <pfad> [--dry-run]`.
+- Liest nur die Datei. Verbindet nie mit der Datenbank des Altsystems.
+- Prüft `format` und `version`. Unbekannte Version → Abbruch mit Hinweis.
+- Löst Logins per Helix `Get Users` (bis 100 je Aufruf, App-Token) zu Twitch-IDs auf.
+  Nicht auflösbare Logins (umbenannt, gelöscht) kommen in den Bericht und werden nicht importiert.
+- Legt fehlende `identities` an. Vorhandene (gleiche `twitch_id`) werden wiederverwendet.
+  Hat sich ein Streamer vor dem Stichtag schon im Neubau angemeldet, nutzt der Import sein
+  Konto und sein Solo-Team.
+- Jede Änderung läuft als Befehl durch `CommandBus.execute`, Akteur `system:migration`.
+  Befehle: `importLegacyTeam`, `importLegacyGiveaway`. Ereignisse: `team_imported`, `legacy_imported`.
+- `legacy_imported` ist ein Kern-Ereignis für Kern A: Kern A reduziert daraus seinen Startzustand
+  (Sekunden je `pid` und Kanal). Der Rahmen setzt danach den Zustand aus 15.3.
+- Umkehrart `none`. Grund für die UI: „Altbestand. Korrektur über Zeit-Korrektur.“
+- Idempotent: Projektion `legacy_imports (legacy_session_id UNIQUE, giveaway_id, imported_at)`
+  und `legacy_teams (legacy_team_id UNIQUE, team_id)`. Zweiter Lauf mit derselben Datei
+  überspringt vorhandene Teams und Giveaways und sagt es im Bericht.
+- Kontrollsumme: Summe `watchSec` je Kanal in der Datei muss `pgWatchSum` entsprechen (prüft die
+  Datei). Abweichung → Abbruch vor dem ersten Schreiben, Bericht nennt Kanal und Differenz.
+  Sekunden nicht auflösbarer Logins sind keine Abweichung. Der Bericht weist sie je Kanal als
+  „nicht übernommen“ aus, mit Login und Sekunden.
+- `--dry-run`: Die Auflösung per Helix läuft auch im Probelauf, damit der Bericht die nicht
+  auflösbaren Logins nennt. Es wird nichts geschrieben.
+- Bericht als Datei neben der Eingabe (`<datei>.bericht.txt`) und auf der Konsole: Giveaways,
+  Teilnehmer, Sekunden je Kanal, aufgelöst/nicht aufgelöst (mit Login), übersprungen.
+  Der Bericht enthält Logins und ist darum nach 30 Tagen zu löschen. Er ist kein Teil des Journals.
+
+### 15.7 Fehler
+
+| Fehler | Verhalten |
+|---|---|
+| Datei fehlt, falsches Format, falsche Version | Abbruch vor Helix, Hinweis mit erwarteter Version |
+| Helix nicht erreichbar | Wiederholung mit Backoff, nach 3 Versuchen Abbruch, nichts geschrieben |
+| Login nicht auflösbar | Teilnehmer ausgelassen, im Bericht mit Login und Sekunden |
+| Kontrollsumme weicht ab | Abbruch vor dem ersten Schreiben |
+| Giveaway schon importiert | übersprungen, im Bericht |
+| Fehler mitten im Lauf | Giveaway-Transaktion rollt zurück, bereits fertige Giveaways bleiben, Wiederholung ist sicher (idempotent) |
+
+### 15.8 Tests
+
+| Ebene | Inhalt |
+|---|---|
+| Format | Fixture aus Prod-Export (Logins ersetzt), Parser lehnt Version 1 ab |
+| Auflösung | Helix-Stub: aufgelöst, umbenannt, Fehler mit Backoff |
+| Kontrollsumme | Property: importierte Sekunden je Kanal = `pgWatchSum`, Abweichung bricht ab |
+| Idempotenz | zweiter Lauf erzeugt kein Ereignis |
+| Kern A | `reduce(legacy_imported)` = Zustand, als hätte der Rahmen die Sekunden minütlich gebucht |
+| Journal | Payload ohne Login und Twitch-ID (`assertNoTwitchIdentity`) |
+| Ablauf | Testcontainers: Datei → Journal → Projektion → Giveaway Pausiert mit Teilnehmerliste |
+
+### 15.9 Offen für den Umsetzungsplan
+
+- Form der Kanal-Markierung „ohne Verbindung“ und „inaktiv“ im Team-Strom hängt an Teilprojekt 7.
+- Ob `team_imported` ein eigener Ereignistyp ist oder die normalen Team-Ereignisse mit Akteur
+  `system:migration` reichen, entscheidet der Plan zu Teilprojekt 9.
+- Akteur `system:migration` muss in die Akteur-Liste (5.1) und in `ACTOR_RE` (`journal/types.ts`).
+- Teilprojekt 7 braucht einen Befehl „Team mit vorgegebenen Mitgliedern anlegen“ ohne Einladung,
+  nur für `system:migration`.
