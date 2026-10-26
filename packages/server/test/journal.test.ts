@@ -49,6 +49,10 @@ describe('append and read', () => {
     expect(await readStream(pool, registry, STREAM, 1)).toEqual([written[1]]);
     expect(await readEvent(pool, registry, written[0]!.id)).toEqual(written[0]);
     expect(await readEvent(pool, registry, '999999')).toBeNull();
+    expect(await readEvent(pool, registry, 'abc')).toBeNull();
+    expect(await readEvent(pool, registry, '99999999999999999999')).toBeNull();
+    expect(await readEvent(pool, registry, '9223372036854775808')).toBeNull();
+    expect(await isReverted(pool, '99999999999999999999')).toBe(false);
     const head = await pool.query('SELECT last_seq FROM stream_heads WHERE stream = $1', [STREAM]);
     expect(head.rows[0].last_seq).toBe(2);
   });

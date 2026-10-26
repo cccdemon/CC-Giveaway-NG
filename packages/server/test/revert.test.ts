@@ -39,7 +39,7 @@ describe('revert', () => {
     const { pool, bus } = await setup();
     const r1 = await bus.execute(incrementHandler, { stream: STREAM, by: 4 }, ctx());
     const id = r1.ok ? r1.events[0]!.id : '';
-    const res = await bus.execute(revert, { stream: STREAM, eventId: id, reason: 'Falscher Kanal' }, ctx());
+    const res = await bus.execute(revert, { stream: STREAM, eventId: id, reason: '  Falscher Kanal ' }, ctx());
     expect(res.ok).toBe(true);
     const events = await readStream(pool, registry, STREAM);
     expect(events[1]).toMatchObject({ type: 'counter_decremented', payload: { by: 4 }, reason: 'Falscher Kanal', reversesEventId: id });
@@ -76,15 +76,17 @@ describe('revert', () => {
       { eventId: note, reason: 'r' },
       { eventId: incId, reason: 'r' },
       { eventId: '987654', reason: 'r' },
+      { eventId: '99999999999999999999', reason: 'r' },
       { eventId: foreign, reason: 'r' },
       { eventId: incId, reason: '  ' },
+      { eventId: incId, reason: 7 as unknown as string },
     ]) {
       const r = await bus.execute(revert, { stream: STREAM, ...cmd }, ctx());
       codes.push(r.ok ? 'ok' : r.rejection.code);
     }
-    expect(codes).toEqual(['not_reversible', 'already_reverted', 'event_not_found', 'event_not_found', 'reason_required']);
-    const before = (await readStream(pool, registry, STREAM)).length;
-    expect(before).toBe(3);
+    expect(codes).toEqual(['not_reversible', 'already_reverted', 'event_not_found', 'event_not_found', 'event_not_found', 'reason_required', 'reason_required']);
+    const after = (await readStream(pool, registry, STREAM)).length;
+    expect(after).toBe(3);
   });
 
   it('none rejection carries the reason text from the event type', async () => {

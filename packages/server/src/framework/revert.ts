@@ -44,7 +44,7 @@ export function makeRevertHandler<S>(
       return { target, reverted };
     },
     decide(state, cmd, _ctx, { target, reverted }) {
-      if (!cmd.reason?.trim()) return reject('reason_required', 'Gib einen Grund für die Umkehrung an.');
+      if (typeof cmd.reason !== 'string' || !cmd.reason.trim()) return reject('reason_required', 'Gib einen Grund für die Umkehrung an.');
       if (!target || target.stream !== cmd.stream) return reject('event_not_found', 'Diesen Eintrag gibt es in diesem Verlauf nicht.');
       if (reverted) return reject('already_reverted', 'Dieser Eintrag ist schon aufgehoben.');
       const spec = registry.get(target.type).reversal;

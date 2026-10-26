@@ -88,13 +88,21 @@ export async function readStream(db: Queryable, registry: EventTypeRegistry, str
   return r.rows.map((row) => registry.upcast(rowToRecord(row)));
 }
 
+const BIGINT_MAX = 9_223_372_036_854_775_807n;
+
+/** Eine Ereignis-ID muss als BIGINT lesbar sein, sonst wirft Postgres 22003 statt „nicht gefunden“ zu liefern. */
+export function isEventId(id: string): boolean {
+  return /^\d{1,19}$/.test(id) && BigInt(id) <= BIGINT_MAX;
+}
+
 export async function readEvent(db: Queryable, registry: EventTypeRegistry, id: EventId): Promise<EventRecord | null> {
-  if (!/^\d+$/.test(id)) return null;
+  if (!isEventId(id)) return null;
   const r = await db.query<EventRow>(`SELECT ${COLUMNS} FROM events WHERE id = $1`, [id]);
   return r.rows[0] ? registry.upcast(rowToRecord(r.rows[0])) : null;
 }
 
 export async function isReverted(db: Queryable, id: EventId): Promise<boolean> {
+  if (!isEventId(id)) return false;
   const r = await db.query('SELECT 1 FROM events WHERE reverses_event_id = $1 LIMIT 1', [id]);
   return (r.rowCount ?? 0) > 0;
 }
