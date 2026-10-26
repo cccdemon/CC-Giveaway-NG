@@ -5,7 +5,7 @@
 kein Teil-Lesen per offset/limit oder grep.** Bei Widerspruch gilt NEW_DESIGN.md.
 
 ## Harte Regeln
-- Jede Zustandsänderung läuft durch `CommandBus.execute`. Kein zweiter Schreibweg, auch nicht für Tests oder Simulator.
+- Jede Zustandsänderung läuft durch `CommandBus.execute`. Kein zweiter Schreibweg im Produktcode, auch nicht für den Simulator. Nur Schichttests der Journal-/Projektionsmodule (`test/journal.test.ts`, `test/projections.test.ts`) dürfen `appendLocked` direkt rufen.
 - `events` ist append-only. Korrektur = neues Ereignis. Nie UPDATE/DELETE auf `events`.
 - Payloads enthalten nur `pid`, nie Twitch-Name oder Twitch-ID (`assertNoTwitchIdentity`).
 - Ein Kern (`src/kernels/*`) importiert nur `src/kernel-api`. ESLint erzwingt das.
