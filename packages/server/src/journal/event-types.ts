@@ -59,6 +59,12 @@ export class EventTypeRegistry {
 
   upcast(r: EventRecord): EventRecord {
     const def = this.get(r.type);
+    if (!Number.isInteger(r.typeVersion) || r.typeVersion < 1 || r.typeVersion > def.version) {
+      throw new JournalError(
+        'event_version_unsupported',
+        `Das Ereignis ${r.type} hat die Formatversion ${r.typeVersion}, dieser Code kennt nur 1 bis ${def.version}. Aktualisiere den Code, bevor du weiterliest.`,
+      );
+    }
     let payload = r.payload;
     for (let v = r.typeVersion; v < def.version; v++) payload = def.upcasters![v]!(payload);
     return { ...r, payload, typeVersion: def.version };

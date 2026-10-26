@@ -22,7 +22,13 @@ export function scheduleLoop(
       p = Promise.reject(e);
     }
     running = p
-      .catch(onError)
+      .catch((e: unknown) => {
+        try {
+          onError(e);
+        } catch (e2) {
+          console.error(JSON.stringify({ msg: 'Die Fehlerbehandlung eines geplanten Laufs ist selbst fehlgeschlagen.', err: String(e2) }));
+        }
+      })
       .finally(() => {
         if (!stopped) timer = setTimeout(run, intervalMs);
       });

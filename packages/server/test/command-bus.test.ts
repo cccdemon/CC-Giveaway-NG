@@ -152,6 +152,12 @@ describe('CommandBus', () => {
     expect(log.error).toHaveBeenCalledOnce();
   });
 
+  it('refuses a correlationId that is not a UUID before touching the database', async () => {
+    const { pool, bus } = await setup();
+    await expect(bus.execute(incrementHandler, { stream: STREAM, by: 1 }, ctx({ correlationId: 'nope' }))).rejects.toThrow(/correlationId/);
+    expect((await pool.query('SELECT count(*)::int AS n FROM stream_heads')).rows[0].n).toBe(0);
+  });
+
   it('does not publish when decide returns no events', async () => {
     const { bus, publisher } = await setup();
     const noop: CommandHandler<{ stream: string }, { total: number }> = { ...incrementHandler, decide: () => [] };

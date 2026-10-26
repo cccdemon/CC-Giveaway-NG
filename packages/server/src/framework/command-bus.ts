@@ -53,10 +53,15 @@ export interface CommandBusDeps {
 export const SNAPSHOT_EVERY = 1000;
 const RETRYABLE_SQLSTATE = new Set(['40001', '40P01']);
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
 export class CommandBus {
   constructor(private readonly d: CommandBusDeps) {}
 
   async execute<C, S, P>(h: CommandHandler<C, S, P>, cmd: C, ctx: CommandContext): Promise<CommandResult> {
+    if (!UUID_RE.test(ctx.correlationId)) {
+      throw new TypeError(`Die correlationId "${ctx.correlationId}" ist keine UUID. Erzeuge sie mit randomUUID().`);
+    }
     const denied = h.authorize(cmd, ctx);
     if (denied) return this.deny(h, cmd, ctx, denied);
     for (let attempt = 0; ; attempt++) {
@@ -102,7 +107,7 @@ export class CommandBus {
     const every = this.d.snapshotEvery ?? SNAPSHOT_EVERY;
     const newSeq = lastSeq + events.length;
     if (Math.floor(lastSeq / every) === Math.floor(newSeq / every)) return;
-    const next = events.reduce(reducer.apply, state);
+    const next = events.reduce((s, e) => reducer.apply(s, e), state);
     await saveSnapshot(c, stream, reducer, newSeq, next, now);
   }
 

@@ -40,6 +40,17 @@ describe('EventTypeRegistry', () => {
     expect(up.payload).toEqual({ text: 'hi', channel: 'unbekannt' });
   });
 
+  it('upcast refuses versions this code does not know instead of relabeling them', () => {
+    const reg = testRegistry();
+    expect(() => reg.upcast(record({ type: 'note_sent', typeVersion: 3, payload: { text: 'hi', channel: 'c' } }))).toThrow(
+      expect.objectContaining({ code: 'event_version_unsupported' }),
+    );
+    expect(() => reg.upcast(record({ type: 'note_sent', typeVersion: 0, payload: { text: 'hi' } }))).toThrow(
+      expect.objectContaining({ code: 'event_version_unsupported' }),
+    );
+    expect(reg.upcast(record({ type: 'note_sent', typeVersion: 2, payload: { text: 'hi', channel: 'c' } })).typeVersion).toBe(2);
+  });
+
   it('register refuses duplicates and missing upcasters', () => {
     const r = testRegistry();
     expect(() => r.register({ type: 'note_sent', version: 1, schema: z.object({}), reversal: { kind: 'void' } })).toThrow(/doppelt/);
