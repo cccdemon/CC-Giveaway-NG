@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import type { CommandResult } from '../src/framework/command-bus.js';
-import { poolHash, rngFrom, type WinnerStatusCmd } from '../src/framework/giveaway/draw.js';
+import { poolHash, rngFrom, type GateChecker, type WinnerStatusCmd } from '../src/framework/giveaway/draw.js';
+import { defaultKernels } from '../src/framework/kernel-registry.js';
 import { GIVEAWAY_EVENTS, giveawayStream } from '../src/framework/giveaway/state.js';
 import { EVENT_VOIDED } from '../src/framework/revert.js';
 import { readStream } from '../src/journal/journal.js';
+import { plainKernel } from './helpers/plain-kernel.js';
 import { GID, P1, P2, P3, createOpen, must, openWindow, run, setupGiveaway, state, userOf } from './helpers/giveaway.js';
 
 const closers: (() => Promise<void>)[] = [];
@@ -11,8 +13,8 @@ afterEach(async () => {
   for (const c of closers.splice(0)) await c();
 });
 
-async function setup(random: number[] = [0.5, 0.5, 0.5, 0.5]) {
-  const s = await setupGiveaway({ rng: rngFrom(random) });
+async function setup(random: number[] = [0.5, 0.5, 0.5, 0.5], over: Parameters<typeof setupGiveaway>[0] = {}) {
+  const s = await setupGiveaway({ rng: rngFrom(random), ...over });
   closers.push(s.close);
   return s;
 }
@@ -191,5 +193,34 @@ describe('Ziehung', () => {
     expect(r).toEqual({ ok: false, rejection: { rejected: true, code: 'not_a_winner', message: 'Diese Person ist kein Gewinner.' } });
     expect(await code(run(rt, rt.handlers.setWinnerStatus, set(P2, 'pending')))).toBe('invalid_winner_status');
     expect(await code(run(rt, rt.handlers.setWinnerStatus, set(P2, 'nope')))).toBe('invalid_winner_status');
+  });
+
+  it('pool with only zero weights is empty and writes nothing', async () => {
+    const kernels = defaultKernels();
+    kernels.register({ ...plainKernel, id: 'zero', pool: (st) => st.registered.map((pid: string) => ({ pid, weight: 0 })) });
+    const { pool, rt } = await setup([0.5], { kernels });
+    await createOpen(rt, { kernelId: 'zero' });
+    await must(rt, rt.handlers.register, { giveawayId: GID, pid: P1 }, { actor: userOf(P1) });
+    await must(rt, rt.handlers.close, { giveawayId: GID });
+    expect(await run(rt, rt.handlers.draw, draw)).toEqual({
+      ok: false,
+      rejection: { rejected: true, code: 'empty_pool', message: 'Niemand ist angemeldet.' },
+    });
+    const types = (await readStream(pool, rt.registry, giveawayStream(GID))).map((e) => e.type);
+    expect(types).not.toContain(GIVEAWAY_EVENTS.drawn);
+    expect((await state(rt)).status).toBe('closed');
+  });
+
+  it('a pool pid without gate result is not eligible and named in the proof', async () => {
+    const X = '12121212-1212-4212-8212-121212121212';
+    const gates: GateChecker = { check: async () => [ok(P3), ok(P1), ok(X), { pid: P1, ok: false, reasons: ['dup'] }] };
+    const { rt } = await setup([0], { gates });
+    await closedWith(rt, [P1, P2, P3]);
+    const [e] = await must(rt, rt.handlers.draw, draw);
+    expect(e!.payload).toMatchObject({
+      winners: [P1],
+      pool: [{ pid: P1, weight: 1 }, { pid: P3, weight: 1 }],
+      gates: [ok(P1), { pid: P2, ok: false, reasons: ['no_result'] }, ok(P3)],
+    });
   });
 });

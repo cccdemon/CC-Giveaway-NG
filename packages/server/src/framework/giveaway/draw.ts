@@ -26,6 +26,7 @@ export function rngFrom(values: number[]): Rng {
 }
 
 const byPid = (a: PoolEntry, b: PoolEntry): number => (a.pid < b.pid ? -1 : a.pid > b.pid ? 1 : 0);
+const drawable = (e: PoolEntry): boolean => Number.isFinite(e.weight) && e.weight > 0;
 
 export function poolHash(pool: PoolEntry[]): string {
   const sorted = pool.map((e) => ({ pid: e.pid, weight: e.weight })).sort(byPid);
@@ -56,7 +57,7 @@ function pickWeighted(entries: PoolEntry[], count: number, rng: Rng, random: num
 }
 
 export function drawWinners(pool: PoolEntry[], mode: DrawMode, count: number, rng: Rng): { winners: Pid[]; random: number[] } {
-  const entries = pool.filter((e) => Number.isFinite(e.weight) && e.weight > 0).sort(byPid);
+  const entries = pool.filter(drawable).sort(byPid);
   const n = Math.min(count, entries.length);
   const random: number[] = [];
   if (n <= 0) return { winners: [], random };
@@ -126,19 +127,22 @@ function kernelPool(d: DrawDeps, state: GiveawayState): PoolEntry[] {
   return d.kernels.get(state.kernelId).pool(state.kernelState, state.settings.config);
 }
 
-/** Bedingungen für alle Einträge des Kern-Topfs. Ohne passenden Zustand leer, decide lehnt dann ab. */
+/** Bedingungen für alle Einträge des Kern-Topfs. Ohne passenden Zustand leer, decide lehnt dann ab.
+ *  Genau ein Ergebnis je pid des Topfs: fremde und doppelte Ergebnisse fallen weg, fehlende gelten als nicht erfüllt. */
 function checkGates(d: DrawDeps, status: GiveawayState['status']) {
   return async (c: pg.PoolClient, cmd: { giveawayId: string }): Promise<GateResult[]> => {
     const state = await d.loadState(c, giveawayStream(cmd.giveawayId));
     if (!state.exists || state.status !== status) return [];
-    return d.gates.check(c, state.settings.gates, kernelPool(d, state).map((p) => p.pid));
+    const pids = kernelPool(d, state).map((p) => p.pid);
+    const results = await d.gates.check(c, state.settings.gates, pids);
+    return pids.map((pid) => results.find((r) => r.pid === pid) ?? { pid, ok: false, reasons: ['no_result'] });
   };
 }
 
-/** Kern-Topf ohne Einträge, die eine Bedingung verfehlen oder in `without` stehen. */
+/** Kern-Topf ohne Einträge, die eine Bedingung verfehlen, in `without` stehen oder kein positives Gewicht haben. */
 function eligible(d: DrawDeps, state: GiveawayState, gates: GateResult[], without: readonly Pid[]): PoolEntry[] {
   const ok = new Set(gates.filter((g) => g.ok).map((g) => g.pid));
-  return kernelPool(d, state).filter((p) => ok.has(p.pid) && !without.includes(p.pid));
+  return kernelPool(d, state).filter((p) => drawable(p) && ok.has(p.pid) && !without.includes(p.pid));
 }
 
 function emptyPool(d: DrawDeps, state: GiveawayState): Rejection {
@@ -159,6 +163,7 @@ export function drawHandler(d: DrawDeps): CommandHandler<DrawCmd, GiveawayState,
       if (pool.length === 0) return emptyPool(d, state);
       const mode = d.kernels.get(state.kernelId).drawMode;
       const { winners, random } = drawWinners(pool, mode, state.settings.winnersCount, d.rng);
+      if (winners.length === 0) return emptyPool(d, state);
       return [
         { type: GIVEAWAY_EVENTS.drawn, payload: { mode, winners, pool, poolHash: poolHash(pool), random, gates, excluded: [] } },
       ];
@@ -184,6 +189,7 @@ export function redrawHandler(d: DrawDeps): CommandHandler<RedrawCmd, GiveawaySt
       if (pool.length === 0) return emptyPool(d, state);
       const mode = d.kernels.get(state.kernelId).drawMode;
       const { winners: fresh, random } = drawWinners(pool, mode, 1, d.rng);
+      if (fresh.length === 0) return emptyPool(d, state);
       const winners = [...target.winners.filter((p) => p !== cmd.replace), ...fresh];
       // Neue Ziehung vor dem Void der alten: nur so behält der Reducer die Stati bleibender Gewinner (state.ts).
       return [
