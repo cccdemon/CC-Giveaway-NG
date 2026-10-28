@@ -14,6 +14,7 @@ describe('acquireSchedulerLock', () => {
     expect(err).toBeInstanceOf(SchedulerLockError);
     expect((err as Error).message).toBe('Ein Scheduler läuft schon. Beende diesen Prozess, es darf nur einen geben.');
     await first.release();
+    await first.release();
     const second = await acquireSchedulerLock(db.pool);
     await second.release();
   });

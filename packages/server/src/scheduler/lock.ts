@@ -10,7 +10,7 @@ export class SchedulerLockError extends Error {
   }
 }
 
-/** Hält einen eigenen Client mit pg_try_advisory_lock bis release(). */
+/** Hält einen eigenen Client mit pg_try_advisory_lock bis release(). release() ist idempotent. */
 export async function acquireSchedulerLock(pool: pg.Pool): Promise<{ release(): Promise<void> }> {
   const c = await pool.connect();
   let got: boolean;
@@ -24,8 +24,18 @@ export async function acquireSchedulerLock(pool: pg.Pool): Promise<{ release(): 
     c.release();
     throw new SchedulerLockError();
   }
+  // Stirbt die Verbindung, ist der Lock weg. Weiterlaufen hieße: ein zweiter Scheduler könnte starten.
+  const onLost = (e: Error) => {
+    console.error(JSON.stringify({ msg: 'Der Scheduler-Lock ist verloren. Der Prozess beendet sich, damit nur eine Instanz läuft.', err: e.message }));
+    process.exit(1);
+  };
+  c.on('error', onLost);
+  let released = false;
   return {
     async release() {
+      if (released) return;
+      released = true;
+      c.off('error', onLost);
       try {
         await c.query('SELECT pg_advisory_unlock($1)', [SCHEDULER_LOCK_KEY]);
       } finally {

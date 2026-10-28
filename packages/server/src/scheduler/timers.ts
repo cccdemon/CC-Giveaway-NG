@@ -21,14 +21,17 @@ export async function runDueTimers(
   log: BusLogger,
   batch = TIMER_BATCH,
 ): Promise<{ ran: number; rejected: number; failed: number }> {
-  const due = await pool.query<{ stream: string; key: string; command: KernelCommand }>(
-    'SELECT stream, key, command FROM timers WHERE due_at <= $1 ORDER BY due_at LIMIT $2',
+  // due_at als Text: volle Mikrosekunden-Genauigkeit für den Vergleich beim Löschen.
+  const due = await pool.query<{ stream: string; key: string; command: KernelCommand; due_at: string }>(
+    'SELECT stream, key, command, due_at::text AS due_at FROM timers WHERE due_at <= $1 ORDER BY due_at LIMIT $2',
     [now, batch],
   );
   let ran = 0, rejected = 0, failed = 0;
   // Die Tabelle timers ist nur ein Spiegel der Kern-Zeitgeber, kein Zustand. Eine Zeile zu löschen verliert nichts:
   // Der timersProjector schreibt sie beim nächsten Ereignis des Stroms neu, solange der Kern sie noch will.
-  const dropRow = (stream: string, key: string) => pool.query('DELETE FROM timers WHERE stream = $1 AND key = $2', [stream, key]);
+  // Gelöscht wird nur die gelesene Fassung: Hat ein anderer Befehl die Zeile inzwischen neu geschrieben, bleibt sie.
+  const dropRow = (r: { stream: string; key: string; due_at: string }) =>
+    pool.query('DELETE FROM timers WHERE stream = $1 AND key = $2 AND due_at = $3::timestamptz', [r.stream, r.key, r.due_at]);
   for (const row of due.rows) {
     const giveawayId = row.stream.startsWith(STREAM_PREFIX) ? row.stream.slice(STREAM_PREFIX.length) : row.stream;
     try {
@@ -37,13 +40,14 @@ export async function runDueTimers(
         { giveawayId, command: row.command },
         { actor: 'system:scheduler', correlationId: randomUUID(), now },
       );
+      // Gezählt wird erst nach dem Löschen. Wirft das Löschen, zählt der Lauf nur als failed.
       if (r.ok) {
-        ran++;
         // Ohne Ereignis läuft kein Projektor. Bleibt die Zeile, ist sie veraltet.
-        if (r.events.length === 0) await dropRow(row.stream, row.key);
+        if (r.events.length === 0) await dropRow(row);
+        ran++;
       } else {
+        await dropRow(row);
         rejected++;
-        await dropRow(row.stream, row.key);
       }
     } catch (e) {
       failed++;
