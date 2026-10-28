@@ -35,7 +35,7 @@ export function validateConfig<C>(schema: ConfigSchema<C>, input: unknown): { ok
   for (const key of Object.keys(fields)) {
     const field = fields[key];
     if (!field) continue;
-    if (!(key in given)) {
+    if (!Object.hasOwn(given, key)) {
       value[key] = field.default;
       continue;
     }
@@ -44,7 +44,7 @@ export function validateConfig<C>(schema: ConfigSchema<C>, input: unknown): { ok
     else value[key] = given[key];
   }
   for (const key of Object.keys(given)) {
-    if (!(key in fields)) lines.push(`${key}: Dieses Feld gibt es nicht.`);
+    if (!Object.hasOwn(fields, key)) lines.push(`${key}: Dieses Feld gibt es nicht.`);
   }
   if (lines.length > 0) return reject('invalid_config', lines.join('\n'));
   return { ok: true, value: value as C };
