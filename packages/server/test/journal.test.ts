@@ -104,6 +104,16 @@ describe('append and read', () => {
     }))).rejects.toThrow(/Unbekannter Akteur/);
   });
 
+  it('assertActor accepts system:migration and rejects system:unknown', async () => {
+    const pool = await setup();
+    const args = (actor: string) => withTx(pool, async (c) => appendLocked(c, registry, {
+      stream: STREAM, lastSeq: await lockStream(c, STREAM), actor, correlationId: randomUUID(), at: AT,
+      events: [{ type: 'counter_incremented', payload: { by: 1 } }],
+    }));
+    await expect(args('system:migration')).resolves.toHaveLength(1);
+    await expect(args('system:unknown')).rejects.toThrow(/Unbekannter Akteur/);
+  });
+
   it('detects a stale lastSeq as seq_conflict without duplicates', async () => {
     const pool = await setup();
     const args = (lastSeq: number) => ({

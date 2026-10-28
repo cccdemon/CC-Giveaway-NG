@@ -101,8 +101,14 @@ export async function readEvent(db: Queryable, registry: EventTypeRegistry, id: 
   return r.rows[0] ? registry.upcast(rowToRecord(r.rows[0])) : null;
 }
 
-export async function isReverted(db: Queryable, id: EventId): Promise<boolean> {
+/** Wirksam umgekehrt: es gibt eine Umkehrung, die selbst nicht (wirksam) aufgehoben ist. */
+export async function isReverted(db: Queryable, id: EventId, seen: ReadonlySet<string> = new Set()): Promise<boolean> {
   if (!isEventId(id)) return false;
-  const r = await db.query('SELECT 1 FROM events WHERE reverses_event_id = $1 LIMIT 1', [id]);
-  return (r.rowCount ?? 0) > 0;
+  if (seen.has(id)) throw new JournalError('reversal_cycle', `Zyklische Umkehrkette bei Ereignis ${id}.`);
+  const next = new Set(seen).add(id);
+  const r = await db.query<{ id: string }>('SELECT id FROM events WHERE reverses_event_id = $1', [id]);
+  for (const row of r.rows) {
+    if (!(await isReverted(db, String(row.id), next))) return true;
+  }
+  return false;
 }

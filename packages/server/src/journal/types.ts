@@ -32,7 +32,7 @@ export class JournalError extends Error {
 
 const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
 const STREAM_RE = new RegExp(`^(platform|(giveaway|team|account):${UUID})$`);
-const ACTOR_RE = new RegExp(`^(user:${UUID}|system:(ingest|scheduler|twitch))$`);
+const ACTOR_RE = new RegExp(`^(user:${UUID}|system:(ingest|scheduler|twitch|migration))$`);
 
 export function assertStreamId(s: string): void {
   if (!STREAM_RE.test(s)) throw new JournalError('invalid_stream', `Unbekannter Strom: ${s}`);

@@ -55,6 +55,18 @@ describe('revert', () => {
     expect((await readStream(pool, registry, STREAM)).reduce(counterReducer.apply, counterReducer.initial())).toEqual({ total: 4 });
   });
 
+  it('an event whose reversal was reverted can be reverted again', async () => {
+    const { pool, bus } = await setup();
+    const r1 = await bus.execute(incrementHandler, { stream: STREAM, by: 4 }, ctx());
+    const incId = r1.ok ? r1.events[0]!.id : '';
+    const r2 = await bus.execute(revert, { stream: STREAM, eventId: incId, reason: 'a' }, ctx());
+    const r3 = await bus.execute(revert, { stream: STREAM, eventId: r2.ok ? r2.events[0]!.id : '', reason: 'b' }, ctx());
+    expect(r3.ok).toBe(true);
+    const r4 = await bus.execute(revert, { stream: STREAM, eventId: incId, reason: 'c' }, ctx());
+    expect(r4.ok).toBe(true);
+    expect((await readStream(pool, registry, STREAM)).reduce(counterReducer.apply, counterReducer.initial())).toEqual({ total: 0 });
+  });
+
   it('void writes event_voided', async () => {
     const { pool, bus } = await setup();
     const id = await firstId(bus, emit('thing_drawn', { winner: '44444444-4444-4444-8444-444444444444' }));
