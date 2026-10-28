@@ -36,7 +36,7 @@ describe('KernelRegistry', () => {
 
   it('register twice throws', () => {
     const r = defaultKernels();
-    expect(() => r.register(instantKernel)).toThrow();
+    expect(() => r.register(instantKernel)).toThrow(/schon registriert/);
   });
 
   it('event type without kernel prefix throws', () => {
@@ -48,7 +48,7 @@ describe('KernelRegistry', () => {
 
   it('duplicate command type throws', () => {
     const r = new KernelRegistry();
-    expect(() => r.register(fake('baz', 'baz_x', ['go', 'go']))).toThrow();
+    expect(() => r.register(fake('baz', 'baz_x', ['go', 'go']))).toThrow(/doppelt/);
     expect(r.has('baz')).toBe(false);
   });
 

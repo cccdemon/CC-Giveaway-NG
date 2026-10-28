@@ -167,17 +167,22 @@ describe('Kern B Sofortverlosung', () => {
   it('property: pool deterministic, weights >= 0, registered sorted and unique', () => {
     const seeds = [1, 7, 42, 99, 123, 256, 777, 1001, 2024, 3141, 4242, 5555, 6789, 8080, 9001, 10007, 31337, 65535, 99991, 123457];
     expect(seeds).toHaveLength(20);
+    const picks = new Set<number>();
+    const pids = new Set<string>();
     for (const seed of seeds) {
+      // Park–Miller: x * 48271 bleibt unter 2^53, also exakt. Werte aus den hohen Bits.
       let x = seed;
       const next = (n: number): number => {
-        x = (x * 1103515245 + 12345) % 2147483648;
-        return x % n;
+        x = (x * 48271) % 2147483647;
+        return Math.floor((x / 2147483647) * n);
       };
       let s = fresh();
       for (let i = 0; i < 40; i += 1) {
         const pid = `p-${next(8)}`;
         const at = plus(i * 10);
         const pick = next(4);
+        picks.add(pick);
+        pids.add(pid);
         const e =
           pick === 0 ? ev(FRAMEWORK_EVENTS.registered, { pid }, at)
           : pick === 1 ? ev(FRAMEWORK_EVENTS.withdrawn, { pid }, at)
@@ -191,5 +196,7 @@ describe('Kern B Sofortverlosung', () => {
         expect(pool.every((p) => p.weight >= 0)).toBe(true);
       }
     }
+    expect([...picks].sort()).toEqual([0, 1, 2, 3]);
+    expect(pids.size).toBe(8);
   });
 });
