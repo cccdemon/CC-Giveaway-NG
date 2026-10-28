@@ -26,6 +26,7 @@ export interface GiveawaySettings {
 export interface DrawRecord {
   eventId: string;
   winners: Pid[];
+  excluded: Pid[]; // Ausschlüsse früherer Ersatzziehungen, bleiben bei der nächsten draußen
   voided: boolean;
 }
 
@@ -107,12 +108,12 @@ function applyFramework(kernels: KernelRegistry, s: GiveawayState, e: EventRecor
       return { ...s, registered: Object.fromEntries(Object.entries(s.registered).filter(([k]) => k !== pid)) };
     }
     case GIVEAWAY_EVENTS.drawn: {
-      const { winners } = e.payload as { winners: Pid[] };
+      const { winners, excluded } = e.payload as { winners: Pid[]; excluded: Pid[] };
       const next = { ...s.winners };
       for (const pid of winners) next[pid] ??= 'pending';
       return {
         ...s,
-        draws: [...s.draws, { eventId: e.id, winners: [...winners], voided: false }],
+        draws: [...s.draws, { eventId: e.id, winners: [...winners], excluded: [...excluded], voided: false }],
         status: 'drawn',
         winners: next,
       };

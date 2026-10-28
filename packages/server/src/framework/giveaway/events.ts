@@ -115,7 +115,7 @@ export function registerGiveawayEvents(registry: EventTypeRegistry, kernels: Ker
     schema: z.object({
       mode: z.enum(['weighted', 'equal', 'highest']),
       winners: z.array(z.uuid()),
-      pool: z.array(z.object({ pid: z.uuid(), weight: z.number() })),
+      pool: z.array(z.object({ pid: z.uuid(), weight: z.number().nonnegative() })),
       poolHash: z.string(),
       random: z.array(z.number()),
       gates: z.array(z.object({ pid: z.uuid(), ok: z.boolean(), reasons: z.array(z.string()) })),

@@ -201,9 +201,20 @@ export function giveawayRevertHandler(
   registry: EventTypeRegistry,
 ): CommandHandler<RevertCommand, GiveawayState, RevertPrepared> {
   const control = authorizeControl(d.auth);
-  return makeRevertHandler(d.reducer, registry, (cmd: RevertCommand, ctx, c) =>
+  const base = makeRevertHandler(d.reducer, registry, (cmd: RevertCommand, ctx, c) =>
     cmd.stream.startsWith(STREAM_PREFIX)
       ? control({ giveawayId: cmd.stream.slice(STREAM_PREFIX.length) }, ctx, c)
       : GIVEAWAY_NOT_FOUND(),
   );
+  return {
+    ...base,
+    decide(state, cmd, ctx, prepared) {
+      const out = base.decide(state, cmd, ctx, prepared);
+      // Sonst holte der Reducer ein abgeschlossenes oder abgebrochenes Giveaway nach Geschlossen zurück.
+      if (!isRejection(out) && prepared.target?.type === GIVEAWAY_EVENTS.drawn && state.status !== 'drawn') {
+        return reject('not_drawn', 'Nur im Zustand Gezogen lässt sich eine Ziehung aufheben.');
+      }
+      return out;
+    },
+  };
 }

@@ -141,7 +141,7 @@ describe('giveaway reducer', () => {
     const s1 = reduce([created(), status(2, 'draft', 'closed'), drawn(3, [P1])]);
     expect(s1.status).toBe('drawn');
     expect(s1.winners).toEqual({ [P1]: 'pending' });
-    expect(s1.draws).toEqual([{ eventId: '3', winners: [P1], voided: false }]);
+    expect(s1.draws).toEqual([{ eventId: '3', winners: [P1], excluded: [], voided: false }]);
     const s2 = reducer.apply(s1, voided(4, '3'));
     expect(s2.status).toBe('closed');
     expect(s2.winners).toEqual({});

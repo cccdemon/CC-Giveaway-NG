@@ -3,6 +3,20 @@ import type pg from 'pg';
 import { EventTypeRegistry } from '../journal/event-types.js';
 import { CommandBus, type BusLogger, type CommandHandler, type StreamReducer } from './command-bus.js';
 import type { GiveawayAuthorizer } from './giveaway/authorize.js';
+import {
+  csprng,
+  drawHandler,
+  noGates,
+  redrawHandler,
+  winnerStatusHandler,
+  type DrawCmd,
+  type DrawDeps,
+  type GateChecker,
+  type GateResult,
+  type RedrawCmd,
+  type Rng,
+  type WinnerStatusCmd,
+} from './giveaway/draw.js';
 import { registerGiveawayEvents } from './giveaway/events.js';
 import {
   changeSettingsHandler,
@@ -20,6 +34,7 @@ import { registerHandler, withdrawHandler, type RegisterCmd } from './giveaway/r
 import { makeGiveawayReducer, type GiveawayState } from './giveaway/state.js';
 import { defaultKernels, type KernelRegistry } from './kernel-registry.js';
 import { ProjectionRegistry } from './projections.js';
+import { loadStreamState } from './state.js';
 import type { Publisher } from './publisher.js';
 import type { RevertCommand, RevertPrepared } from './revert.js';
 
@@ -27,8 +42,8 @@ export interface RuntimeOptions {
   pool: pg.Pool;
   publisher: Publisher;
   auth: GiveawayAuthorizer;
-  gates?: unknown; // Task 10: GateChecker
-  rng?: () => number; // Task 10: Rng
+  gates?: GateChecker;
+  rng?: Rng;
   log: BusLogger;
   kernels?: KernelRegistry;
   snapshotEvery?: number;
@@ -56,6 +71,9 @@ export interface Runtime {
     withdraw: Handler<RegisterCmd>;
     kernelCommand: Handler<KernelCommandCmd>;
     revert: Handler<RevertCommand, RevertPrepared>;
+    draw: Handler<DrawCmd, GateResult[]>;
+    redraw: Handler<RedrawCmd, GateResult[]>;
+    setWinnerStatus: Handler<WinnerStatusCmd>;
   };
 }
 
@@ -75,6 +93,12 @@ export function createRuntime(o: RuntimeOptions): Runtime {
     ...(o.snapshotEvery === undefined ? {} : { snapshotEvery: o.snapshotEvery }),
   });
   const d: GiveawayDeps = { kernels, auth: o.auth, reducer };
+  const dd: DrawDeps = {
+    ...d,
+    gates: o.gates ?? noGates,
+    rng: o.rng ?? csprng,
+    loadState: (c, stream) => loadStreamState(c, registry, stream, reducer),
+  };
   return {
     kernels,
     registry,
@@ -95,6 +119,9 @@ export function createRuntime(o: RuntimeOptions): Runtime {
       withdraw: withdrawHandler(d),
       kernelCommand: kernelCommandHandler(d),
       revert: giveawayRevertHandler(d, registry),
+      draw: drawHandler(dd),
+      redraw: redrawHandler(dd),
+      setWinnerStatus: winnerStatusHandler(d),
     },
   };
 }
