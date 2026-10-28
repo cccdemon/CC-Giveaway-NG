@@ -14,6 +14,7 @@ import {
   type GiveawayCmd,
   type GiveawayDeps,
 } from './giveaway/lifecycle.js';
+import { kernelCommandHandler, type KernelCommandCmd } from './giveaway/kernel-command.js';
 import { giveawaysProjector } from './giveaway/projectors.js';
 import { registerHandler, withdrawHandler, type RegisterCmd } from './giveaway/registration.js';
 import { makeGiveawayReducer, type GiveawayState } from './giveaway/state.js';
@@ -53,6 +54,7 @@ export interface Runtime {
     changeSettings: Handler<ChangeSettingsCmd>;
     register: Handler<RegisterCmd>;
     withdraw: Handler<RegisterCmd>;
+    kernelCommand: Handler<KernelCommandCmd>;
     revert: Handler<RevertCommand, RevertPrepared>;
   };
 }
@@ -91,6 +93,7 @@ export function createRuntime(o: RuntimeOptions): Runtime {
       changeSettings: changeSettingsHandler(d),
       register: registerHandler(d),
       withdraw: withdrawHandler(d),
+      kernelCommand: kernelCommandHandler(d),
       revert: giveawayRevertHandler(d, registry),
     },
   };

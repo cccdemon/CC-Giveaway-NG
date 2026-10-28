@@ -50,6 +50,10 @@ export async function createOpen(rt: Runtime, over: Partial<CreateGiveawayCmd> =
   await must(rt, rt.handlers.open, { giveawayId: cmd.giveawayId });
 }
 
+export async function openWindow(rt: Runtime, over: Partial<CommandContext> = {}): Promise<EventRecord[]> {
+  return must(rt, rt.handlers.kernelCommand, { giveawayId: GID, command: { type: 'open_window', args: {} } }, over);
+}
+
 export async function state(rt: Runtime, giveawayId: string = GID): Promise<GiveawayState> {
   const pool = pools.get(rt);
   if (!pool) throw new Error('Runtime stammt nicht aus setupGiveaway.');
