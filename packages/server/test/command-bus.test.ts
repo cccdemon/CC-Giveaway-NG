@@ -4,8 +4,9 @@ import { CommandBus, type CommandBusDeps, type CommandHandler } from '../src/fra
 import { ProjectionRegistry } from '../src/framework/projections.js';
 import { InMemoryPublisher, type Publisher } from '../src/framework/publisher.js';
 import { readStream } from '../src/journal/journal.js';
+import { reject } from '../src/shared/rejection.js';
 import { AT, freshDb } from './helpers/db.js';
-import { STREAM, counterReducer, ctx, incrementHandler, testRegistry, totalsProjector } from './helpers/fixtures.js';
+import { STREAM, counterReducer, ctx, incrementHandler, testRegistry, totalsProjector, totalsStateProjector } from './helpers/fixtures.js';
 
 let close: (() => Promise<void>) | undefined;
 afterEach(async () => close?.());
@@ -15,6 +16,7 @@ async function setup(over: Partial<CommandBusDeps> = {}) {
   const db = await freshDb();
   close = db.close;
   await db.pool.query('CREATE TABLE test_totals (stream TEXT PRIMARY KEY, total INT NOT NULL)');
+  await db.pool.query('CREATE TABLE test_state_totals (stream TEXT PRIMARY KEY, total INT NOT NULL, seq INT NOT NULL)');
   const projections = new ProjectionRegistry();
   projections.register(totalsProjector);
   const publisher = new InMemoryPublisher();
@@ -179,5 +181,47 @@ describe('CommandBus', () => {
     } finally {
       await pool2.end();
     }
+  });
+  const heads = async (pool: pg.Pool) => (await pool.query('SELECT count(*)::int AS n FROM stream_heads')).rows[0].n;
+
+  it('rejected command on a new stream leaves no stream_heads row', async () => {
+    const { pool, bus } = await setup();
+    const res = await bus.execute(incrementHandler, { stream: STREAM, by: 500 }, ctx());
+    expect(res).toMatchObject({ ok: false, rejection: { code: 'too_big' } });
+    expect(await heads(pool)).toBe(0);
+    const log = await pool.query("SELECT action, reason, target FROM access_log WHERE kind = 'denied'");
+    expect(log.rows).toEqual([{ action: 'increment', reason: 'too_big', target: STREAM }]);
+  });
+
+  it('authorize may read the database and runs before the lock', async () => {
+    const { pool, bus } = await setup();
+    const reading: CommandHandler<{ stream: string; by: number }, { total: number }> = {
+      ...incrementHandler,
+      authorize: async (_cmd, _ctx, c) => ((await c.query('SELECT 1 AS n')).rows[0].n === 1 ? reject('seen_db', 'x') : null),
+    };
+    const res = await bus.execute(reading, { stream: STREAM, by: 1 }, ctx());
+    expect(res).toMatchObject({ ok: false, rejection: { code: 'seen_db' } });
+    expect(await heads(pool)).toBe(0);
+  });
+
+  it('state projector receives the state after the command', async () => {
+    const projections = new ProjectionRegistry();
+    projections.registerState(totalsStateProjector);
+    const { pool, bus } = await setup({ projections });
+    await bus.execute(incrementHandler, { stream: STREAM, by: 3 }, ctx());
+    await bus.execute(incrementHandler, { stream: STREAM, by: 4 }, ctx());
+    const r = await pool.query('SELECT total, seq FROM test_state_totals WHERE stream = $1', [STREAM]);
+    expect(r.rows).toEqual([{ total: 7, seq: 2 }]);
+  });
+
+  it('state projector failure rolls back the command', async () => {
+    const projections = new ProjectionRegistry();
+    projections.registerState({ name: 'broken_state', reducer: 'counter', apply: async () => { throw new Error('kaputt'); }, reset: async () => undefined });
+    const { pool, bus, publisher } = await setup({ projections });
+    await expect(bus.execute(incrementHandler, { stream: STREAM, by: 1 }, ctx())).rejects.toThrow('kaputt');
+    expect(await readStream(pool, registry, STREAM)).toEqual([]);
+    const head = await pool.query('SELECT last_seq FROM stream_heads WHERE stream = $1', [STREAM]);
+    expect(head.rows[0]?.last_seq ?? 0).toBe(0);
+    expect(publisher.messages).toEqual([]);
   });
 });

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type pg from 'pg';
 import type { CommandContext, CommandHandler, StreamReducer } from '../../src/framework/command-bus.js';
-import type { Projector } from '../../src/framework/projections.js';
+import type { Projector, StateProjector } from '../../src/framework/projections.js';
 import { z } from 'zod';
 import { EventTypeRegistry } from '../../src/journal/event-types.js';
 import type { EventRecord } from '../../src/journal/types.js';
@@ -74,6 +74,22 @@ export const totalsProjector: Projector = {
   },
   async reset(c: pg.PoolClient) {
     await c.query('DELETE FROM test_totals');
+  },
+};
+
+/** Hört auf den Reducer `counter` und schreibt den Zustand nach dem Befehl. */
+export const totalsStateProjector: StateProjector<CounterState> = {
+  name: 'state_totals',
+  reducer: 'counter',
+  async apply(c: pg.PoolClient, stream: string, state: CounterState, head: { seq: number; at: Date }) {
+    await c.query(
+      'INSERT INTO test_state_totals (stream, total, seq) VALUES ($1, $2, $3) ON CONFLICT (stream) DO UPDATE SET total = $2, seq = $3',
+      [stream, state.total, head.seq],
+    );
+  },
+  async reset(c: pg.PoolClient, stream?: string) {
+    if (stream === undefined) await c.query('DELETE FROM test_state_totals');
+    else await c.query('DELETE FROM test_state_totals WHERE stream = $1', [stream]);
   },
 };
 
