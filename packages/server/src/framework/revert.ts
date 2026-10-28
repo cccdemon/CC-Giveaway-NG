@@ -2,8 +2,8 @@ import { z } from 'zod';
 import type { EventTypeRegistry } from '../journal/event-types.js';
 import { isReverted, readEvent } from '../journal/journal.js';
 import type { EventId, EventRecord, StreamId } from '../journal/types.js';
-import { isRejection, reject, type Rejection } from '../shared/rejection.js';
-import type { CommandContext, CommandHandler, StreamReducer } from './command-bus.js';
+import { isRejection, reject } from '../shared/rejection.js';
+import type { CommandHandler, StreamReducer } from './command-bus.js';
 
 export interface RevertCommand {
   stream: StreamId;
@@ -31,7 +31,7 @@ export function registerRevertTypes(registry: EventTypeRegistry): void {
 export function makeRevertHandler<S>(
   reducer: StreamReducer<S>,
   registry: EventTypeRegistry,
-  authorize: (cmd: RevertCommand, ctx: CommandContext) => Rejection | null,
+  authorize: CommandHandler<RevertCommand, S, RevertPrepared>['authorize'],
 ): CommandHandler<RevertCommand, S, RevertPrepared> {
   return {
     type: 'revert',
