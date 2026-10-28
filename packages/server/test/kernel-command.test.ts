@@ -5,6 +5,7 @@ import { giveawayStream } from '../src/framework/giveaway/state.js';
 import { readStream } from '../src/journal/journal.js';
 import { INSTANT_EVENTS, type InstantState } from '../src/kernels/instant/index.js';
 import { AT } from './helpers/db.js';
+import { kernelsWithPlain, plainKernel } from './helpers/plain-kernel.js';
 import { GID, P1, P2, TEAM, at, createOpen, must, openWindow, run, setupGiveaway, state, userOf } from './helpers/giveaway.js';
 
 const closers: (() => Promise<void>)[] = [];
@@ -134,5 +135,25 @@ describe('Kern-Befehle', () => {
     const events = await readStream(pool, rt.registry, giveawayStream(GID));
     expect(events.at(-1)).toMatchObject({ type: INSTANT_EVENTS.windowClosed, reversesEventId: opened!.id, reason: 'Zu früh geöffnet' });
     expect((await kernelState(rt)).window).toBeNull();
+  });
+  it('participant commands only for oneself', async () => {
+    const kernels = kernelsWithPlain();
+    kernels.register({
+      ...plainKernel,
+      id: 'selfcmd',
+      commands: [{ type: 'ping', label: 'Ping', issuer: 'participant' }],
+      decide: () => [],
+    });
+    const { rt } = await setup({ kernels });
+    await createOpen(rt, { kernelId: 'selfcmd', settings: { prize: 'Key', channels: [P1], config: {} } });
+    const ping = { giveawayId: GID, command: { type: 'ping', pid: P1, args: {} } };
+    expect(await code(run(rt, rt.handlers.kernelCommand, ping, { actor: userOf(P1) }))).toBe('ok');
+    expect(await run(rt, rt.handlers.kernelCommand, ping, { actor: userOf(P2) })).toEqual({
+      ok: false,
+      rejection: { rejected: true, code: 'not_you', message: 'Du kannst diesen Befehl nur für dich selbst ausführen.' },
+    });
+    expect(await code(run(rt, rt.handlers.kernelCommand, { ...ping, command: { ...ping.command, pid: 'x' } }, { actor: userOf(P1) }))).toBe(
+      'invalid_id',
+    );
   });
 });

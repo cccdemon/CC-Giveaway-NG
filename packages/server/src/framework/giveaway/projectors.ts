@@ -125,18 +125,26 @@ export const RUNNING: readonly GiveawayStatus[] = ['draft', 'open', 'paused', 'c
 
 /**
  * Giveaways in RUNNING mit abweichender kernel_version → rebuildStream. Liefert die neu aufgebauten ids.
- * Giveaways mit unbekanntem Kern bleiben unberührt. Abgeschlossene behalten ihre Version.
+ * Giveaways mit unbekanntem Kern bleiben unberührt und stehen in skipped. Abgeschlossene behalten ihre Version.
  */
-export async function reconcileKernelVersions(pool: pg.Pool, rt: Runtime): Promise<string[]> {
+export async function reconcileKernelVersions(
+  pool: pg.Pool,
+  rt: Runtime,
+): Promise<{ rebuilt: string[]; skipped: { id: string; kernel: string }[] }> {
   const r = await pool.query<{ id: string; kernel: string; kernel_version: number }>(
     'SELECT id, kernel, kernel_version FROM giveaways WHERE status = ANY($1) ORDER BY id',
     [[...RUNNING]],
   );
   const rebuilt: string[] = [];
+  const skipped: { id: string; kernel: string }[] = [];
   for (const row of r.rows) {
-    if (!rt.kernels.has(row.kernel) || rt.kernels.get(row.kernel).version === row.kernel_version) continue;
+    if (!rt.kernels.has(row.kernel)) {
+      skipped.push({ id: row.id, kernel: row.kernel });
+      continue;
+    }
+    if (rt.kernels.get(row.kernel).version === row.kernel_version) continue;
     await rt.projections.rebuildStream(pool, rt.registry, giveawayStream(row.id), rt.reducer);
     rebuilt.push(row.id);
   }
-  return rebuilt;
+  return { rebuilt, skipped };
 }

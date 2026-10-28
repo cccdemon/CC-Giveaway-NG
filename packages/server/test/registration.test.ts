@@ -98,4 +98,20 @@ describe('Anmeldung und Rückzug', () => {
     expect(events.map((e) => [e.type, e.actor])).toEqual([[GIVEAWAY_EVENTS.registered, 'system:ingest']]);
     expect(Object.keys((await state(rt)).registered)).toEqual([P1]);
   });
+  it('revert of an old registration is rejected when it is no longer the current one', async () => {
+    const { pool, rt } = await setup();
+    await createOpen(rt, PLAIN);
+    const [first] = await must(rt, rt.handlers.register, cmd, me);
+    await must(rt, rt.handlers.withdraw, cmd, me);
+    const revert = { stream: giveawayStream(GID), eventId: first!.id, reason: 'Versehen' };
+    const NOT_REG = { ok: false, rejection: { rejected: true, code: 'not_registered', message: 'Du bist nicht angemeldet.' } };
+    expect(await run(rt, rt.handlers.revert, revert)).toEqual(NOT_REG);
+    const [second] = await must(rt, rt.handlers.register, cmd, me);
+    const before = await countOf(pool, rt, GIVEAWAY_EVENTS.withdrawn);
+    expect(await run(rt, rt.handlers.revert, revert)).toEqual(NOT_REG);
+    expect(await countOf(pool, rt, GIVEAWAY_EVENTS.withdrawn)).toBe(before);
+    expect(Object.keys((await state(rt)).registered)).toEqual([P1]);
+    await must(rt, rt.handlers.revert, { ...revert, eventId: second!.id });
+    expect((await state(rt)).registered).toEqual({});
+  });
 });

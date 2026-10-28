@@ -4,7 +4,7 @@ import type { KernelCommand } from '../../kernel-api/index.js';
 import type { NewEvent } from '../../journal/types.js';
 import { isRejection, reject, type Rejection } from '../../shared/rejection.js';
 import type { CommandContext, CommandHandler } from '../command-bus.js';
-import { GIVEAWAY_NOT_FOUND, INVALID_ID, UUID_RE, loadGiveawayRow } from './authorize.js';
+import { GIVEAWAY_NOT_FOUND, authorizeSelf, loadGiveawayRow } from './authorize.js';
 import type { GiveawayDeps } from './lifecycle.js';
 import { giveawayStream, type GiveawayState } from './state.js';
 
@@ -23,12 +23,8 @@ export function kernelCommandHandler(d: GiveawayDeps): CommandHandler<KernelComm
     const spec = kernel.commands.find((s) => s.type === cmd.command?.type);
     if (!spec) return UNKNOWN_COMMAND(kernel.label);
     switch (spec.issuer) {
-      case 'participant': {
-        const pid = cmd.command.pid;
-        if (typeof pid !== 'string' || !UUID_RE.test(pid)) return INVALID_ID();
-        if (ctx.actor === `user:${pid}`) return null;
-        return reject('not_you', 'Du kannst nur dich selbst anmelden oder abmelden.');
-      }
+      case 'participant':
+        return authorizeSelf(cmd.command.pid, ctx.actor, 'Du kannst diesen Befehl nur für dich selbst ausführen.');
       case 'streamer':
         return d.auth.controls(c, ctx.actor, row.teamId);
       case 'scheduler':

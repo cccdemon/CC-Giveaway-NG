@@ -44,6 +44,13 @@ export async function loadGiveawayRow(c: pg.PoolClient, giveawayId: string): Pro
 export const GIVEAWAY_NOT_FOUND = (): Rejection => reject('giveaway_not_found', 'Dieses Giveaway gibt es nicht.');
 export const INVALID_ID = (): Rejection => reject('invalid_id', 'Die ID ist keine gültige UUID.');
 
+/** Teilnehmer-Befehle: nur der Teilnehmer selbst. pid muss eine UUID sein. */
+export function authorizeSelf(pid: unknown, actor: Actor, text = 'Du kannst nur dich selbst anmelden oder abmelden.'): Rejection | null {
+  if (typeof pid !== 'string' || !UUID_RE.test(pid)) return INVALID_ID();
+  if (actor === `user:${pid}`) return null;
+  return reject('not_you', text);
+}
+
 export function authorizeControl(
   auth: GiveawayAuthorizer,
 ): (cmd: { giveawayId: string }, ctx: CommandContext, c: pg.PoolClient) => Promise<Rejection | null> {

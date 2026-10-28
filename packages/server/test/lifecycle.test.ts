@@ -194,4 +194,15 @@ describe('Lebenszyklus', () => {
     expect((await pool.query('SELECT count(*)::int AS n FROM stream_heads')).rows[0].n).toBe(0);
     expect(await code(run(rt, rt.handlers.revert, { stream: giveawayStream(GID), eventId: '1', reason: 'x' }))).toBe('giveaway_not_found');
   });
+  it('change_settings merges a partial config over the current one', async () => {
+    const { rt } = await setup();
+    await createOpen(rt);
+    await must(rt, rt.handlers.changeSettings, { giveawayId: GID, settings: { config: { windowSec: 300 } } });
+    expect((await state(rt)).settings.config).toEqual({ windowSec: 300 });
+    expect(await must(rt, rt.handlers.changeSettings, { giveawayId: GID, settings: { config: {} } })).toEqual([]);
+    await must(rt, rt.handlers.changeSettings, { giveawayId: GID, settings: { prize: 'Neu' } });
+    const s = await state(rt);
+    expect(s.settings.config).toEqual({ windowSec: 300 });
+    expect(s.settings.prize).toBe('Neu');
+  });
 });

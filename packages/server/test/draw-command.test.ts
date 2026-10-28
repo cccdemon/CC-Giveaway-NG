@@ -223,4 +223,65 @@ describe('Ziehung', () => {
       gates: [ok(P1), { pid: P2, ok: false, reasons: ['no_result'] }, ok(P3)],
     });
   });
+  it('revert of a registration after the draw is too late', async () => {
+    const { pool, rt } = await setup([0.5]);
+    await closedWith(rt, [P1, P2]);
+    await must(rt, rt.handlers.draw, draw);
+    const stream = giveawayStream(GID);
+    const before = await readStream(pool, rt.registry, stream);
+    const reg = before.find((e) => e.type === GIVEAWAY_EVENTS.registered && (e.payload as { pid: string }).pid === P1)!;
+    const r = await run(rt, rt.handlers.revert, { stream, eventId: reg.id, reason: 'Versehen' });
+    expect(r).toEqual({
+      ok: false,
+      rejection: { rejected: true, code: 'too_late', message: 'Nach der Ziehung ist kein Rückzug mehr möglich.' },
+    });
+    expect(await readStream(pool, rt.registry, stream)).toHaveLength(before.length);
+    expect(Object.keys((await state(rt)).registered).sort()).toEqual([P1, P2].sort());
+  });
+
+  it('revert of a winner status in completed is rejected', async () => {
+    const { pool, rt } = await setup([0.1, 0.9]);
+    await closedWith(rt, [P1, P2, P3], 2);
+    await must(rt, rt.handlers.draw, draw);
+    const [done] = await must(rt, rt.handlers.setWinnerStatus, set(P1, 'done'));
+    await must(rt, rt.handlers.setWinnerStatus, set(P3, 'forfeited'));
+    await must(rt, rt.handlers.complete, { giveawayId: GID });
+    const stream = giveawayStream(GID);
+    const before = (await readStream(pool, rt.registry, stream)).length;
+    const r = await run(rt, rt.handlers.revert, { stream, eventId: done!.id, reason: 'Versehen' });
+    expect(r).toEqual({
+      ok: false,
+      rejection: { rejected: true, code: 'not_drawn', message: 'Nur im Zustand Gezogen lässt sich ein Gewinnstatus ändern.' },
+    });
+    expect(await readStream(pool, rt.registry, stream)).toHaveLength(before);
+    expect((await state(rt)).winners[P1]).toBe('done');
+  });
+
+  it('revert of a winner status while drawn still works', async () => {
+    const { rt } = await setup([0.5]);
+    await closedWith(rt, [P1, P2, P3]);
+    await must(rt, rt.handlers.draw, draw); // P2
+    const [done] = await must(rt, rt.handlers.setWinnerStatus, set(P2, 'done'));
+    await must(rt, rt.handlers.revert, { stream: giveawayStream(GID), eventId: done!.id, reason: 'Versehen' });
+    expect((await state(rt)).winners[P2]).toBe('pending');
+  });
+
+  it('revert of a settings change after the draw is locked', async () => {
+    const { pool, rt } = await setup([0.1, 0.9]);
+    await createOpen(rt);
+    const [changed] = await must(rt, rt.handlers.changeSettings, { giveawayId: GID, settings: { winnersCount: 2 } });
+    await openWindow(rt);
+    for (const pid of [P1, P2, P3]) await must(rt, rt.handlers.register, { giveawayId: GID, pid }, { actor: userOf(pid) });
+    await must(rt, rt.handlers.close, { giveawayId: GID });
+    await must(rt, rt.handlers.draw, draw);
+    const stream = giveawayStream(GID);
+    const before = (await readStream(pool, rt.registry, stream)).length;
+    const r = await run(rt, rt.handlers.revert, { stream, eventId: changed!.id, reason: 'Vertippt' });
+    expect(r).toEqual({
+      ok: false,
+      rejection: { rejected: true, code: 'settings_locked', message: 'Nach dem Schließen änderst du keine Regeln mehr.' },
+    });
+    expect(await readStream(pool, rt.registry, stream)).toHaveLength(before);
+    expect((await state(rt)).settings.winnersCount).toBe(2);
+  });
 });

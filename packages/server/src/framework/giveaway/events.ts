@@ -6,6 +6,7 @@ import { canonicalJson } from '../../shared/canonical.js';
 import { reject } from '../../shared/rejection.js';
 import type { KernelRegistry } from '../kernel-registry.js';
 import { registerRevertTypes } from '../revert.js';
+import { NOT_REGISTERED_TEXT, TOO_LATE, TOO_LATE_TEXT } from './registration.js';
 import { GIVEAWAY_EVENTS, type GiveawaySettings, type GiveawayState, type GiveawayStatus, type WinnerStatus } from './state.js';
 
 const GATE_IDS = ['follow', 'account_age', 'follow_age', 'presence'] as const satisfies readonly GateId[];
@@ -90,7 +91,14 @@ export function registerGiveawayEvents(registry: EventTypeRegistry, kernels: Ker
     schema: pidSchema,
     reversal: {
       kind: 'compensate',
-      inverse: (target) => ({ type: GIVEAWAY_EVENTS.withdrawn, payload: { pid: (target.payload as { pid: string }).pid } }),
+      inverse(target, state) {
+        const s = state as GiveawayState;
+        const { pid } = target.payload as { pid: string };
+        // Dieselben Regeln wie withdraw. Nur die aktuelle Anmeldung lässt sich zurücknehmen.
+        if (TOO_LATE.includes(s.status)) return reject('too_late', TOO_LATE_TEXT);
+        if (s.registered[pid]?.eventId !== target.id) return reject('not_registered', NOT_REGISTERED_TEXT);
+        return { type: GIVEAWAY_EVENTS.withdrawn, payload: { pid } };
+      },
     },
   });
 

@@ -140,7 +140,7 @@ describe('Lesetabellen des Giveaways', () => {
     await must(rt, rt.handlers.setWinnerStatus, { giveawayId: GID2, pid: P1, status: 'done' });
     await must(rt, rt.handlers.complete, { giveawayId: GID2 });
     await pool.query('UPDATE giveaways SET kernel_version = 99, registered_count = 42');
-    expect(await reconcileKernelVersions(pool, rt)).toEqual([GID]);
+    expect(await reconcileKernelVersions(pool, rt)).toEqual({ rebuilt: [GID], skipped: [] });
     expect(await giveawayRow(pool)).toMatchObject({ status: 'open', kernel_version: 1, registered_count: 2 });
     expect(await giveawayRow(pool, GID2)).toMatchObject({ status: 'completed', kernel_version: 99, registered_count: 42 });
   });
@@ -164,5 +164,18 @@ describe('Lesetabellen des Giveaways', () => {
     expect(await loadSnapshot(pool, STREAM, { name: 'giveaway', version: rt2.reducer.version })).toBeNull();
     const old = await pool.query<{ reducer_version: number }>('SELECT reducer_version FROM snapshots WHERE stream = $1', [STREAM]);
     expect(old.rows.map((r) => r.reducer_version)).toContain(rt.reducer.version);
+  });
+  it('reconcile names giveaways with an unknown kernel', async () => {
+    const { pool, rt } = await setup();
+    await createOpen(rt);
+    await pool.query(
+      `INSERT INTO giveaways (id, team_id, kernel, kernel_version, status, prize, winners_count, claim_days, config, channels, gates,
+         last_seq, created_at, updated_at)
+       VALUES ($1, $2, 'gone', 1, 'open', 'Key', 1, 14, '{}', '[]', '[]', 1, now(), now())`,
+      [GID2, TEAM],
+    );
+    await pool.query('UPDATE giveaways SET kernel_version = 99 WHERE id = $1', [GID]);
+    expect(await reconcileKernelVersions(pool, rt)).toEqual({ rebuilt: [GID], skipped: [{ id: GID2, kernel: 'gone' }] });
+    expect(await giveawayRow(pool, GID2)).toMatchObject({ kernel: 'gone' });
   });
 });

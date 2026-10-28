@@ -2,7 +2,7 @@ import type { AnyKernel } from '../kernel-api/index.js';
 import { JournalError } from '../journal/types.js';
 import { instantKernel } from '../kernels/instant/index.js';
 
-export const FRAMEWORK_REDUCER_VERSION = 2; // 2: DrawRecord.excluded
+export const FRAMEWORK_REDUCER_VERSION = 3; // 2: DrawRecord.excluded, 3: registered[pid].eventId
 
 /** FNV-1a 32 Bit über `${frameworkVersion}` + je Kern `${id}@${version}` (nach id sortiert), & 0x7fffffff (F4). Rein. */
 export function versionStamp(frameworkVersion: number, kernels: readonly { id: string; version: number }[]): number {

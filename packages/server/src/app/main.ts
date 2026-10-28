@@ -26,8 +26,8 @@ async function main() {
     await redis.quit();
   });
   const rt = createRuntime({ pool, publisher: new RedisPublisher(redis), auth: denyUsers, log: app.log });
-  const rebuilt = await reconcileKernelVersions(pool, rt);
-  app.log.info({ rebuilt }, 'Kern-Versionsabgleich erledigt.');
+  const { rebuilt, skipped } = await reconcileKernelVersions(pool, rt);
+  app.log.info({ rebuilt, skipped }, 'Kern-Versionsabgleich erledigt.');
   await app.listen({ host: '0.0.0.0', port: config.port });
 
   const shutdown = (signal: string) => {

@@ -37,7 +37,7 @@ export interface GiveawayState {
   kernelVersionAtCreate: number;
   settings: GiveawaySettings;
   status: GiveawayStatus;
-  registered: Record<Pid, { since: string }>;
+  registered: Record<Pid, { since: string; eventId: string }>; // eventId = Ereignis der aktuellen Anmeldung
   draws: DrawRecord[];
   winners: Record<Pid, WinnerStatus>; // Gewinner der gültigen Ziehung(en)
   kernelState: unknown;
@@ -101,7 +101,7 @@ function applyFramework(kernels: KernelRegistry, s: GiveawayState, e: EventRecor
       return { ...s, settings: (e.payload as { after: GiveawaySettings }).after };
     case GIVEAWAY_EVENTS.registered: {
       const { pid } = e.payload as { pid: Pid };
-      return { ...s, registered: { ...s.registered, [pid]: { since: e.createdAt.toISOString() } } };
+      return { ...s, registered: { ...s.registered, [pid]: { since: e.createdAt.toISOString(), eventId: e.id } } };
     }
     case GIVEAWAY_EVENTS.withdrawn: {
       const { pid } = e.payload as { pid: Pid };

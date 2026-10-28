@@ -3,7 +3,7 @@ import type pg from 'pg';
 import type { Pid } from '../../kernel-api/index.js';
 import { reject, type Rejection } from '../../shared/rejection.js';
 import type { CommandContext, CommandHandler } from '../command-bus.js';
-import { GIVEAWAY_NOT_FOUND, INVALID_ID, UUID_RE, loadGiveawayRow } from './authorize.js';
+import { GIVEAWAY_NOT_FOUND, UUID_RE, authorizeSelf, loadGiveawayRow } from './authorize.js';
 import type { GiveawayDeps } from './lifecycle.js';
 import { GIVEAWAY_EVENTS, giveawayStream, type GiveawayState, type GiveawayStatus } from './state.js';
 
@@ -12,14 +12,16 @@ export interface RegisterCmd {
   pid: Pid;
 }
 
-const TOO_LATE: readonly GiveawayStatus[] = ['drawn', 'completed', 'cancelled'];
+export const TOO_LATE: readonly GiveawayStatus[] = ['drawn', 'completed', 'cancelled'];
+export const TOO_LATE_TEXT = 'Nach der Ziehung ist kein Rückzug mehr möglich.';
+export const NOT_REGISTERED_TEXT = 'Du bist nicht angemeldet.';
 
-async function authorizeSelf(cmd: RegisterCmd, ctx: CommandContext, c: pg.PoolClient): Promise<Rejection | null> {
+async function authorizeRegistration(cmd: RegisterCmd, ctx: CommandContext, c: pg.PoolClient): Promise<Rejection | null> {
   const row = await loadGiveawayRow(c, cmd.giveawayId);
   if (!row) return GIVEAWAY_NOT_FOUND();
-  if (typeof cmd.pid !== 'string' || !UUID_RE.test(cmd.pid)) return INVALID_ID();
-  if (ctx.actor === `user:${cmd.pid}` || ctx.actor.startsWith('system:')) return null;
-  return reject('not_you', 'Du kannst nur dich selbst anmelden oder abmelden.');
+  // System-Akteure (Simulator, Ingest) melden für andere an.
+  if (ctx.actor.startsWith('system:') && typeof cmd.pid === 'string' && UUID_RE.test(cmd.pid)) return null;
+  return authorizeSelf(cmd.pid, ctx.actor);
 }
 
 export function registerHandler(d: GiveawayDeps): CommandHandler<RegisterCmd, GiveawayState> {
@@ -27,7 +29,7 @@ export function registerHandler(d: GiveawayDeps): CommandHandler<RegisterCmd, Gi
     type: 'register',
     streamOf: (cmd) => giveawayStream(cmd.giveawayId),
     reducer: d.reducer,
-    authorize: authorizeSelf,
+    authorize: authorizeRegistration,
     decide(state, cmd, ctx) {
       if (!state.exists) return GIVEAWAY_NOT_FOUND();
       if (state.status !== 'open') return reject('not_open', 'Das Giveaway nimmt gerade keine Anmeldungen an.');
@@ -44,11 +46,11 @@ export function withdrawHandler(d: GiveawayDeps): CommandHandler<RegisterCmd, Gi
     type: 'withdraw',
     streamOf: (cmd) => giveawayStream(cmd.giveawayId),
     reducer: d.reducer,
-    authorize: authorizeSelf,
+    authorize: authorizeRegistration,
     decide(state, cmd) {
       if (!state.exists) return GIVEAWAY_NOT_FOUND();
-      if (!state.registered[cmd.pid]) return reject('not_registered', 'Du bist nicht angemeldet.');
-      if (TOO_LATE.includes(state.status)) return reject('too_late', 'Nach der Ziehung ist kein Rückzug mehr möglich.');
+      if (!state.registered[cmd.pid]) return reject('not_registered', NOT_REGISTERED_TEXT);
+      if (TOO_LATE.includes(state.status)) return reject('too_late', TOO_LATE_TEXT);
       return [{ type: GIVEAWAY_EVENTS.withdrawn, payload: { pid: cmd.pid } }];
     },
   };
