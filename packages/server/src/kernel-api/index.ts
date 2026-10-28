@@ -59,7 +59,8 @@ export interface KernelCommandSpec {
 }
 
 export type KernelReversal =
-  | { kind: 'compensate'; inverse: (payload: unknown) => NewKernelEvent | Rejection }
+  /** state = der eigene Kern-Zustand vor der Umkehrung. */
+  | { kind: 'compensate'; inverse: (payload: unknown, state: unknown) => NewKernelEvent | Rejection }
   | { kind: 'void' }
   | { kind: 'none'; why: string };
 

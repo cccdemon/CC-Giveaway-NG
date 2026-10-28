@@ -136,6 +136,27 @@ describe('Kern-Befehle', () => {
     expect(events.at(-1)).toMatchObject({ type: INSTANT_EVENTS.windowClosed, reversesEventId: opened!.id, reason: 'Zu früh geöffnet' });
     expect((await kernelState(rt)).window).toBeNull();
   });
+  it('revert of an old window_opened does not close the current window', async () => {
+    const { pool, rt } = await setup();
+    await createOpen(rt);
+    const [first] = await openWindow(rt);
+    await must(rt, rt.handlers.kernelCommand, closeCmd, SCHEDULER);
+    await openWindow(rt, { now: at(300) });
+    const stream = giveawayStream(GID);
+    const before = (await readStream(pool, rt.registry, stream)).length;
+    const r = await run(rt, rt.handlers.revert, { stream, eventId: first!.id, reason: 'Versehen' });
+    expect(r).toEqual({
+      ok: false,
+      rejection: {
+        rejected: true,
+        code: 'not_latest_window',
+        message: 'Nur das offene Fenster lässt sich zurücknehmen. Dieses Fenster ist schon zu.',
+      },
+    });
+    expect(await readStream(pool, rt.registry, stream)).toHaveLength(before);
+    expect((await kernelState(rt)).window).toEqual({ until: at(420).toISOString() });
+  });
+
   it('participant commands only for oneself', async () => {
     const kernels = kernelsWithPlain();
     kernels.register({

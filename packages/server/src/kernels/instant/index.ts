@@ -62,7 +62,17 @@ export const instantKernel: Kernel<InstantConfig, InstantState> = {
         const until = (payload as { until?: unknown } | null)?.until;
         return isIso(until) ? null : 'until muss ein gültiges ISO-Datum sein.';
       },
-      reversal: { kind: 'compensate', inverse: () => ({ type: INSTANT_EVENTS.windowClosed, payload: {} }) },
+      reversal: {
+        kind: 'compensate',
+        inverse(payload, state) {
+          // Sonst schlösse die Umkehrung eines alten Fensters das gerade offene.
+          const window = (state as InstantState).window;
+          if (window === null || window.until !== (payload as { until?: unknown } | null)?.until) {
+            return reject('not_latest_window', 'Nur das offene Fenster lässt sich zurücknehmen. Dieses Fenster ist schon zu.');
+          }
+          return { type: INSTANT_EVENTS.windowClosed, payload: {} };
+        },
+      },
     },
     {
       type: INSTANT_EVENTS.windowClosed,

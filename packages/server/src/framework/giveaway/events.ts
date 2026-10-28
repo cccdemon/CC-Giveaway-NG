@@ -28,7 +28,9 @@ const pidSchema = z.object({ pid: z.uuid() });
 const NOT_LATEST = (): ReturnType<typeof reject> => reject('not_latest_transition', 'Nimm zuerst die späteren Übergänge zurück.');
 
 function kernelReversal(r: KernelReversal): ReversalSpec {
-  if (r.kind === 'compensate') return { kind: 'compensate', inverse: (target) => r.inverse(target.payload) };
+  if (r.kind === 'compensate') {
+    return { kind: 'compensate', inverse: (target, state) => r.inverse(target.payload, (state as GiveawayState).kernelState) };
+  }
   return r;
 }
 

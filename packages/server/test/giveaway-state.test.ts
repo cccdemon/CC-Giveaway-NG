@@ -314,10 +314,14 @@ describe('registerGiveawayEvents', () => {
       payload: { pid: P1 },
     });
 
-    expect(wo.inverse(rec(6, INSTANT_EVENTS.windowOpened, { until: '2026-10-28T12:02:00.000Z' }), base)).toEqual({
+    const woT = rec(6, INSTANT_EVENTS.windowOpened, { until: '2026-10-28T12:02:00.000Z' });
+    const windowOpen = { ...base, kernelState: { ...(base.kernelState as InstantState), window: { until: '2026-10-28T12:02:00.000Z' } } };
+    expect(wo.inverse(woT, windowOpen)).toEqual({
       type: INSTANT_EVENTS.windowClosed,
       payload: {},
     });
+    const closedWindow = wo.inverse(woT, base);
+    expect(isRejection(closedWindow) && closedWindow.code).toBe('not_latest_window');
     expect(wc).toEqual({ kind: 'none', why: 'Ein geschlossenes Fenster bleibt zu. Öffne ein neues Fenster.' });
   });
 });

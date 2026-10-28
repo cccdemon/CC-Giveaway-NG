@@ -161,7 +161,19 @@ describe('Kern B Sofortverlosung', () => {
     const def = k.events.find((e) => e.type === INSTANT_EVENTS.windowOpened)!;
     expect(def.reversal.kind).toBe('compensate');
     if (def.reversal.kind !== 'compensate') return;
-    expect(def.reversal.inverse({ until: plus(120) })).toEqual({ type: 'instant_window_closed', payload: {} });
+    expect(def.reversal.inverse({ until: plus(120) }, opened(plus(120)))).toEqual({ type: 'instant_window_closed', payload: {} });
+  });
+
+  it('reversal of window_opened only for the open window', () => {
+    const def = k.events.find((e) => e.type === INSTANT_EVENTS.windowOpened)!;
+    if (def.reversal.kind !== 'compensate') throw new Error('compensate erwartet');
+    const NOT_LATEST = {
+      rejected: true,
+      code: 'not_latest_window',
+      message: 'Nur das offene Fenster lässt sich zurücknehmen. Dieses Fenster ist schon zu.',
+    };
+    expect(def.reversal.inverse({ until: plus(120) }, fresh())).toEqual(NOT_LATEST);
+    expect(def.reversal.inverse({ until: plus(120) }, opened(plus(600)))).toEqual(NOT_LATEST);
   });
 
   it('property: pool deterministic, weights >= 0, registered sorted and unique', () => {
