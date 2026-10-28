@@ -42,6 +42,7 @@ export async function loadGiveawayRow(c: pg.PoolClient, giveawayId: string): Pro
 }
 
 export const GIVEAWAY_NOT_FOUND = (): Rejection => reject('giveaway_not_found', 'Dieses Giveaway gibt es nicht.');
+export const INVALID_ID = (): Rejection => reject('invalid_id', 'Die ID ist keine gültige UUID.');
 
 export function authorizeControl(
   auth: GiveawayAuthorizer,

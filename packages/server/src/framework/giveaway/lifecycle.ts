@@ -7,7 +7,7 @@ import type { CommandHandler, StreamReducer } from '../command-bus.js';
 import { validateConfig } from '../kernel-config.js';
 import type { KernelRegistry } from '../kernel-registry.js';
 import { makeRevertHandler, type RevertCommand, type RevertPrepared } from '../revert.js';
-import { GIVEAWAY_NOT_FOUND, UUID_RE, authorizeControl, type GiveawayAuthorizer } from './authorize.js';
+import { GIVEAWAY_NOT_FOUND, INVALID_ID, UUID_RE, authorizeControl, type GiveawayAuthorizer } from './authorize.js';
 import {
   GIVEAWAY_EVENTS,
   TRANSITIONS,
@@ -73,7 +73,6 @@ const SETTINGS_OPEN: readonly GiveawayStatus[] = ['draft', 'open', 'paused'];
 
 const TEXT_MAX = 200;
 const INVALID_GATE = (): Rejection => reject('invalid_gate', 'Eine Bedingung ist ungültig.');
-const INVALID_ID = (): Rejection => reject('invalid_id', 'Die ID ist keine gültige UUID.');
 
 /** Prüft vollständige Einstellungen gegen den Kern. Liefert sie mit geprüfter config zurück. */
 function checkSettings(kernel: AnyKernel, s: GiveawaySettings): GiveawaySettings | Rejection {
