@@ -12,6 +12,7 @@ export default tseslint.config(
         patterns: [
           { regex: '^\\.\\./', message: 'kernel-api enthält nur Typen und importiert nichts aus src.' },
           { regex: NODE_AND_IO, message: 'kernel-api enthält nur Typen und importiert keine Bibliotheken für I/O.' },
+          { regex: '^zod$', message: 'kernel-api bleibt frei von Bibliotheken.' },
         ],
       }],
     },

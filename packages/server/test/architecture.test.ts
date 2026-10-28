@@ -46,4 +46,7 @@ describe('Modulgrenzen (NEW_DESIGN.md 3.4)', () => {
   it('kernel-api importiert nichts aus src', async () => {
     expect(await restricted('src/kernel-api/index.ts', "import { x } from '../journal/types.js';\nexport const y = x;\n")).toBe(true);
   });
+  it('kernel-api darf zod nicht importieren', async () => {
+    expect(await restricted('src/kernel-api/index.ts', "import { z } from 'zod';\nexport const y = z;\n")).toBe(true);
+  });
 });
