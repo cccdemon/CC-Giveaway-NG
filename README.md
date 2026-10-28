@@ -43,7 +43,7 @@ fachlichen Begriffe (Giveaway, Kern, Topf, Chance …) stehen in
 | **Kern** | Ein Plugin für eine Verlosungsart (Zuschauzeit, Sofortverlosung, Tickets). Ein Kern rechnet nur, er hat keinen Datenbankzugriff. |
 | **Ingest** | Der Teil, der von Twitch holt, was passiert: wer im Chat ist, wer schreibt, wer folgt, ob der Stream läuft. |
 | **Scheduler** | Der Zeitgeber-Prozess: legt Partitionen an, räumt IP-Adressen weg, beendet später Anmeldefenster und Boosts. Davon darf genau einer laufen. |
-| **Einzelinstanz-Lock** | Die Absicherung, dass wirklich nur ein Scheduler läuft: Beim Start holt er sich eine Sperre in PostgreSQL (`pg_advisory_lock`). Ein zweiter Scheduler bekommt sie nicht und bricht mit Hinweis ab. Noch nicht gebaut, kommt in Teilprojekt 2. |
+| **Einzelinstanz-Lock** | Die Absicherung, dass wirklich nur ein Scheduler läuft: Beim Start holt er sich eine Sperre in PostgreSQL (`pg_advisory_lock`). Ein zweiter Scheduler bekommt sie nicht und bricht mit Hinweis ab. |
 | **Advisory Lock** | Eine Sperre in PostgreSQL, die nicht an einer Tabellenzeile hängt, sondern an einer Nummer, die wir selbst wählen. Wir nutzen sie für Migrationen, Partitionen und die Drossel. |
 | **Idempotent** | Ein Vorgang, den man beliebig oft wiederholen kann, ohne dass sich das Ergebnis ändert. Beispiel: die Übernahme aus dem Altsystem überspringt beim zweiten Lauf, was schon da ist. |
 | **Kontrollsumme** | Eine Zahl zum Gegenprüfen, zum Beispiel die Summe aller Sekunden je Kanal. Stimmt sie nicht mit der Quelle überein, bricht der Import ab, bevor etwas geschrieben wird. |
@@ -53,3 +53,13 @@ fachlichen Begriffe (Giveaway, Kern, Topf, Chance …) stehen in
 | **Typecheck / Lint** | `npm run typecheck` prüft Typen (TypeScript), `npm run lint` prüft Regeln, zum Beispiel dass ein Kern nur `kernel-api` importiert. Beides läuft in der CI. |
 | **CI** | GitHub Actions. Bei jedem Push: Typecheck, Lint, alle Tests. Kein Merge ohne grün. |
 | **Teilprojekt** | Ein Abschnitt des Neubaus mit eigenem Umsetzungsplan (NEW_DESIGN.md, Abschnitt 14). Teilprojekt 1 „Fundament“ ist fertig. |
+
+## Prozesse
+
+Zwei Prozesse aus `packages/server`:
+
+- **app** (`npm run start:app`): HTTP-Server mit `/healthz`. Beim Start Migrationen, Partitionen und Kern-Versionsabgleich der Lesetabellen.
+- **scheduler** (`npm run start:scheduler`): holt sich zuerst den Einzelinstanz-Lock. Ein zweiter Scheduler bricht mit Hinweis ab.
+  - Wartung stündlich: Partitionen anlegen, alte IP-Adressen entfernen.
+  - Zeitgeber alle 5 s: fällige Einträge aus `timers` laufen als Kern-Befehl mit Akteur `system:scheduler`.
+  - `timers` ist nur ein Spiegel der Kern-Zeitgeber, kein Zustand. Veraltete Zeilen löscht der Scheduler.
