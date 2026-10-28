@@ -1,12 +1,13 @@
 // Lebenszyklus-Befehle des Stroms giveaway:<id> (NEW_DESIGN.md 7.1).
 import type { AnyKernel, Pid } from '../../kernel-api/index.js';
 import type { EventTypeRegistry } from '../../journal/event-types.js';
+import { canonicalJson } from '../../shared/canonical.js';
 import { isRejection, reject, type Rejection } from '../../shared/rejection.js';
 import type { CommandHandler, StreamReducer } from '../command-bus.js';
 import { validateConfig } from '../kernel-config.js';
 import type { KernelRegistry } from '../kernel-registry.js';
 import { makeRevertHandler, type RevertCommand, type RevertPrepared } from '../revert.js';
-import { GIVEAWAY_NOT_FOUND, authorizeControl, type GiveawayAuthorizer } from './authorize.js';
+import { GIVEAWAY_NOT_FOUND, UUID_RE, authorizeControl, type GiveawayAuthorizer } from './authorize.js';
 import {
   GIVEAWAY_EVENTS,
   TRANSITIONS,
@@ -70,33 +71,42 @@ const TRANSITION_SPEC: Record<TransitionType, { to: GiveawayStatus; from: readon
 
 const SETTINGS_OPEN: readonly GiveawayStatus[] = ['draft', 'open', 'paused'];
 
-/** JSON mit sortierten Schlüsseln. JSONB ordnet Schlüssel beim Speichern um. */
-function canonical(v: unknown): string {
-  return JSON.stringify(v, (_k, x: unknown) =>
-    x !== null && typeof x === 'object' && !Array.isArray(x)
-      ? Object.fromEntries(Object.entries(x).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
-      : x,
-  );
-}
+const TEXT_MAX = 200;
+const INVALID_GATE = (): Rejection => reject('invalid_gate', 'Eine Bedingung ist ungültig.');
+const INVALID_ID = (): Rejection => reject('invalid_id', 'Die ID ist keine gültige UUID.');
 
 /** Prüft vollständige Einstellungen gegen den Kern. Liefert sie mit geprüfter config zurück. */
 function checkSettings(kernel: AnyKernel, s: GiveawaySettings): GiveawaySettings | Rejection {
   const config = validateConfig(kernel.configSchema, s.config);
   if (isRejection(config)) return config;
   if (typeof s.prize !== 'string' || !s.prize.trim()) return reject('prize_required', 'Gib an, was es zu gewinnen gibt.');
+  if (s.prize.length > TEXT_MAX) return reject('prize_too_long', 'Der Gewinn darf höchstens 200 Zeichen haben.');
+  if (s.sponsor !== null && (typeof s.sponsor !== 'string' || s.sponsor.length > TEXT_MAX)) {
+    return reject('sponsor_too_long', 'Der Sponsor darf höchstens 200 Zeichen haben.');
+  }
   if (!Array.isArray(s.channels) || s.channels.length === 0) return reject('channels_required', 'Wähle mindestens einen Kanal.');
+  if (!s.channels.every((ch: unknown) => typeof ch === 'string' && UUID_RE.test(ch))) {
+    return reject('invalid_channel', 'Ein Kanal ist keine gültige ID.');
+  }
   if (!Number.isInteger(s.winnersCount) || s.winnersCount < 1 || s.winnersCount > 100) {
     return reject('invalid_winners_count', 'Die Gewinnerzahl muss zwischen 1 und 100 liegen.');
   }
   if (!Number.isInteger(s.claimDays) || s.claimDays < 1 || s.claimDays > 90) {
     return reject('invalid_claim_days', 'Die Meldefrist muss zwischen 1 und 90 Tagen liegen.');
   }
-  for (const g of s.gates) {
-    if (!kernel.supportedGates.includes(g.id)) {
-      return reject('gate_unsupported', `Die Bedingung ${String(g.id)} gibt es für diesen Kern nicht.`);
+  if (!Array.isArray(s.gates)) return INVALID_GATE();
+  for (const g of s.gates as unknown[]) {
+    if (typeof g !== 'object' || g === null || Array.isArray(g)) return INVALID_GATE();
+    const id = (g as { id?: unknown }).id;
+    if (typeof id !== 'string' || !(kernel.supportedGates as readonly string[]).includes(id)) {
+      return reject('gate_unsupported', `Die Bedingung ${String(id)} gibt es für diesen Kern nicht.`);
     }
   }
   return { ...s, config: config.value as Record<string, unknown> };
+}
+
+function validIds(cmd: { giveawayId: unknown; teamId: unknown }): boolean {
+  return typeof cmd.giveawayId === 'string' && UUID_RE.test(cmd.giveawayId) && typeof cmd.teamId === 'string' && UUID_RE.test(cmd.teamId);
 }
 
 export function createGiveawayHandler(d: GiveawayDeps): CommandHandler<CreateGiveawayCmd, GiveawayState> {
@@ -104,8 +114,10 @@ export function createGiveawayHandler(d: GiveawayDeps): CommandHandler<CreateGiv
     type: 'create_giveaway',
     streamOf: (cmd) => giveawayStream(cmd.giveawayId),
     reducer: d.reducer,
-    authorize: (cmd, ctx, c) => d.auth.controls(c, ctx.actor, cmd.teamId),
+    // Ohne gültige IDs scheitert schon die Stromsperre (assertStreamId). Darum hier, vor der Sperre.
+    authorize: (cmd, ctx, c) => (validIds(cmd) ? d.auth.controls(c, ctx.actor, cmd.teamId) : INVALID_ID()),
     decide(state, cmd) {
+      if (!validIds(cmd)) return INVALID_ID();
       if (state.exists) return reject('already_exists', 'Dieses Giveaway gibt es schon.');
       if (!d.kernels.has(cmd.kernelId)) {
         return reject('unknown_kernel', `Den Kern ${cmd.kernelId} gibt es nicht. Wähle einen anderen Kern.`);
@@ -177,7 +189,7 @@ export function changeSettingsHandler(d: GiveawayDeps): CommandHandler<ChangeSet
         gates: s.gates ?? before.gates,
       });
       if (isRejection(after)) return after;
-      if (canonical(after) === canonical(before)) return [];
+      if (canonicalJson(after) === canonicalJson(before)) return [];
       return [{ type: GIVEAWAY_EVENTS.settingsChanged, payload: { before, after } }];
     },
   };

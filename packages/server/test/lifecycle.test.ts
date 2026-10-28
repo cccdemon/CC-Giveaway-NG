@@ -3,7 +3,7 @@ import { denyUsers } from '../src/framework/giveaway/authorize.js';
 import { GIVEAWAY_EVENTS, giveawayStream } from '../src/framework/giveaway/state.js';
 import type { CommandResult } from '../src/framework/command-bus.js';
 import { readStream } from '../src/journal/journal.js';
-import { GID, GID2, GID3, GID4, P1, STREAMER, TEAM, createOpen, must, run, setupGiveaway, state } from './helpers/giveaway.js';
+import { GID, GID2, GID3, GID4, P1, STREAMER, TEAM, at, createOpen, must, run, setupGiveaway, state } from './helpers/giveaway.js';
 
 let close: (() => Promise<void>) | undefined;
 afterEach(async () => close?.());
@@ -61,6 +61,35 @@ describe('Lebenszyklus', () => {
     expect(gate).toEqual({ ok: false, rejection: { rejected: true, code: 'gate_unsupported', message: 'Die Bedingung presence gibt es für diesen Kern nicht.' } });
     const all = await pool.query('SELECT stream, type FROM events ORDER BY id');
     expect(all.rows).toEqual([{ stream: giveawayStream(GID), type: GIVEAWAY_EVENTS.created }]);
+  });
+
+  it('bad user input is rejected, not thrown', async () => {
+    const { pool, rt } = await setup();
+    const cases: [ReturnType<typeof createCmd>, string][] = [
+      [createCmd({}, { prize: 'x'.repeat(201) }), 'prize_too_long'],
+      [createCmd({}, { sponsor: 'x'.repeat(201) }), 'sponsor_too_long'],
+      [createCmd({}, { channels: ['kanal_a'] }), 'invalid_channel'],
+      [createCmd({}, { gates: [null] }), 'invalid_gate'],
+      [createCmd({}, { gates: ['follow'] }), 'invalid_gate'],
+      [createCmd({ giveawayId: 'kein-uuid' }), 'invalid_id'],
+      [createCmd({ teamId: 'kein-uuid' }), 'invalid_id'],
+    ];
+    for (const [cmd, want] of cases) {
+      const r = await run(rt, rt.handlers.create, cmd as never);
+      expect(r.ok ? 'ok' : r.rejection.code).toBe(want);
+    }
+    await must(rt, rt.handlers.create, createCmd());
+    const r = await run(rt, rt.handlers.changeSettings, { giveawayId: GID, settings: { prize: 'x'.repeat(201) } });
+    expect(r.ok ? 'ok' : r.rejection.code).toBe('prize_too_long');
+    expect((await pool.query('SELECT count(*)::int AS n FROM events')).rows[0].n).toBe(1);
+  });
+
+  it('created_at stays, updated_at and last_seq move', async () => {
+    const { pool, rt } = await setup();
+    await must(rt, rt.handlers.create, createCmd());
+    await must(rt, rt.handlers.open, { giveawayId: GID }, { now: at(60) });
+    const row = (await pool.query('SELECT created_at, updated_at, last_seq FROM giveaways WHERE id = $1', [GID])).rows[0];
+    expect(row).toEqual({ created_at: at(0), updated_at: at(60), last_seq: 2 });
   });
 
   it('transitions follow the table', async () => {

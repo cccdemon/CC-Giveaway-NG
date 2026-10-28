@@ -2,6 +2,7 @@
 import { z } from 'zod';
 import type { GateId, KernelEventDef, KernelReversal } from '../../kernel-api/index.js';
 import type { EventTypeRegistry, ReversalSpec } from '../../journal/event-types.js';
+import { canonicalJson } from '../../shared/canonical.js';
 import { reject } from '../../shared/rejection.js';
 import type { KernelRegistry } from '../kernel-registry.js';
 import { registerRevertTypes } from '../revert.js';
@@ -77,7 +78,7 @@ export function registerGiveawayEvents(registry: EventTypeRegistry, kernels: Ker
       kind: 'compensate',
       inverse(target, state) {
         const { before, after } = target.payload as { before: GiveawaySettings; after: GiveawaySettings };
-        if (JSON.stringify((state as GiveawayState).settings) !== JSON.stringify(after)) return NOT_LATEST();
+        if (canonicalJson((state as GiveawayState).settings) !== canonicalJson(after)) return NOT_LATEST();
         return { type: GIVEAWAY_EVENTS.settingsChanged, payload: { before: after, after: before } };
       },
     },

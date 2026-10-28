@@ -2,6 +2,7 @@
 import type pg from 'pg';
 import type { StreamId } from '../../journal/types.js';
 import type { KernelRegistry } from '../kernel-registry.js';
+import { UUID_RE } from './authorize.js';
 import type { StateProjector } from '../projections.js';
 import type { GiveawayState } from './state.js';
 
@@ -55,7 +56,7 @@ export function giveawaysProjector(kernels: KernelRegistry): StateProjector<Give
     },
     async reset(c: pg.PoolClient, stream?: StreamId) {
       if (stream === undefined) await c.query('DELETE FROM giveaways');
-      else await c.query('DELETE FROM giveaways WHERE id::text = $1', [idOf(stream)]);
+      else if (UUID_RE.test(idOf(stream))) await c.query('DELETE FROM giveaways WHERE id = $1', [idOf(stream)]);
     },
   };
 }

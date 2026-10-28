@@ -27,7 +27,8 @@ export interface GiveawayRow {
   status: GiveawayStatus;
 }
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** Wie z.uuid() im Ereignisschema: Version 1–8, Variante 8–b. */
+export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 /** Liest die Lesetabelle `giveaways`. Keine UUID oder keine Zeile → null. */
 export async function loadGiveawayRow(c: pg.PoolClient, giveawayId: string): Promise<GiveawayRow | null> {
