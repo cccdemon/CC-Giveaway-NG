@@ -29,7 +29,7 @@ import {
   type GiveawayDeps,
 } from './giveaway/lifecycle.js';
 import { kernelCommandHandler, type KernelCommandCmd } from './giveaway/kernel-command.js';
-import { giveawaysProjector } from './giveaway/projectors.js';
+import { giveawaysProjector, participantsProjector, timersProjector } from './giveaway/projectors.js';
 import { registerHandler, withdrawHandler, type RegisterCmd } from './giveaway/registration.js';
 import { makeGiveawayReducer, type GiveawayState } from './giveaway/state.js';
 import { defaultKernels, type KernelRegistry } from './kernel-registry.js';
@@ -82,7 +82,10 @@ export function createRuntime(o: RuntimeOptions): Runtime {
   const registry = new EventTypeRegistry();
   registerGiveawayEvents(registry, kernels);
   const projections = new ProjectionRegistry();
+  // Reihenfolge zählt: giveaway_participants verweist per Fremdschlüssel auf giveaways.
   projections.registerState(giveawaysProjector(kernels));
+  projections.registerState(participantsProjector(kernels));
+  projections.registerState(timersProjector(kernels));
   const reducer = makeGiveawayReducer(kernels);
   const bus = new CommandBus({
     pool: o.pool,
