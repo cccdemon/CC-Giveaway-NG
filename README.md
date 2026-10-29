@@ -7,7 +7,8 @@ Neubau der Giveaway-Plattform. Das Design steht in [NEW_DESIGN.md](NEW_DESIGN.md
 1. Node 24 und Docker installieren.
 2. `npm ci` ausführen.
 3. `docker compose -f docker-compose.dev.yml up -d` startet PostgreSQL und Redis.
-4. `.env.example` nach `.env` kopieren.
+4. `.env.example` nach `.env` kopieren. Twitch-App unter https://dev.twitch.tv/console anlegen, Redirect-URL = `PUBLIC_URL` + `/auth/twitch/callback`.
+   Schlüssel für Kanal-Tokens anlegen: `mkdir secrets && openssl rand -hex 32 > secrets/token.key`.
 5. `npm test` startet alle Tests. Die Tests starten eigene Container.
 
 ## Begriffe
@@ -52,14 +53,24 @@ fachlichen Begriffe (Giveaway, Kern, Topf, Chance …) stehen in
 | **Testcontainers** | Die Tests starten sich eigene PostgreSQL- und Redis-Container in Docker. Keine fremde Datenbank wird je angefasst. |
 | **Typecheck / Lint** | `npm run typecheck` prüft Typen (TypeScript), `npm run lint` prüft Regeln, zum Beispiel dass ein Kern nur `kernel-api` importiert. Beides läuft in der CI. |
 | **CI** | GitHub Actions. Bei jedem Push: Typecheck, Lint, alle Tests. Kein Merge ohne grün. |
-| **Teilprojekt** | Ein Abschnitt des Neubaus mit eigenem Umsetzungsplan (NEW_DESIGN.md, Abschnitt 14). Teilprojekt 1 „Fundament“ ist fertig. |
+| **Konto** | Der Strom `account:<pid>`: Zustimmung zu den Nutzungsbedingungen, Rechtstexte im Profil, verbundener Kanal, Löschung. Entsteht beim ersten Anmelden mit Twitch. |
+| **Identität** | Die Zeile in `identities`: `pid` ↔ Twitch-ID, Login, Anzeigename. Die einzige Stelle mit Twitch-Daten. Löschen entfernt sie, das Journal zeigt dann „gelöschter Teilnehmer #<kurz-id>“. |
+| **Sitzung** | Eine Zeile in `sessions` plus das Cookie `ccg_session` (HttpOnly, 30 Tage). Liegt in PostgreSQL, damit ein Redis-Ausfall niemanden abmeldet. |
+| **Kanal-Token** | Die Twitch-Tokens eines Streamers in `channel_tokens`, AES-256-GCM-verschlüsselt. Der Schlüssel liegt in der Datei aus `TOKEN_KEY_FILE`, nie in der Datenbank. |
+| **Solo-Team** | Das Team, das jeder Streamer beim ersten Anmelden automatisch bekommt (`soloTeamId` im Konto). Giveaways gehören einem Team. |
+| **Rechtstexte** | Impressum, Teilnahmebedingungen und Datenschutzhinweis. Je Giveaway oder im Profil. Beim Öffnen friert der Rahmen sie ein: Text als Kopie, URL mit SHA-256 des Inhalts (`giveaway_legal_frozen`). Ohne sie öffnet kein Giveaway. |
+| **Teilprojekt** | Ein Abschnitt des Neubaus mit eigenem Umsetzungsplan (NEW_DESIGN.md, Abschnitt 14). Teilprojekte 1 bis 3 (Fundament, Kern-Vertrag + Kern B, Konten + Identität) sind fertig. |
 
 ## Prozesse
 
 Zwei Prozesse aus `packages/server`:
 
-- **app** (`npm run start:app`): HTTP-Server mit `/healthz`. Beim Start Migrationen, Partitionen und Kern-Versionsabgleich der Lesetabellen.
+- **app** (`npm run start:app`): HTTP-Server. Beim Start Migrationen, Partitionen und Kern-Versionsabgleich der Lesetabellen.
+  - `GET /healthz`
+  - `GET /auth/twitch/login?return=/pfad` → Twitch → `GET /auth/twitch/callback` setzt das Sitzungs-Cookie. `GET /auth/twitch/connect` verbindet den Kanal mit den Scopes `moderator:read:followers`, `moderator:read:chatters`, `channel:bot`. `POST /auth/logout`.
+  - `GET /me`, `POST /me/terms {version}`, `PUT /me/profile {legal}`, `DELETE /me/channel`, `GET /me/data` (JSON-Export, Eintrag im Zugriffslog), `DELETE /me` (Löschung).
+  - Ablehnungen antworten mit `{code, message}`: 401 ohne Sitzung, 403 fremde Person oder fremdes Team, 404 unbekannt, sonst 400.
 - **scheduler** (`npm run start:scheduler`): holt sich zuerst den Einzelinstanz-Lock. Ein zweiter Scheduler bricht mit Hinweis ab.
-  - Wartung stündlich: Partitionen anlegen, alte IP-Adressen entfernen.
+  - Wartung stündlich: Partitionen anlegen, alte IP-Adressen entfernen, abgelaufene Sitzungen löschen, Konten ohne Anmeldung seit 365 Tagen löschen (Befehl mit Akteur `system:scheduler`).
   - Zeitgeber alle 5 s: fällige Einträge aus `timers` laufen als Kern-Befehl mit Akteur `system:scheduler`.
   - `timers` ist nur ein Spiegel der Kern-Zeitgeber, kein Zustand. Veraltete Zeilen löscht der Scheduler.
