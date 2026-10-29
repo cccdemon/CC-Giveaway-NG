@@ -5,6 +5,7 @@ import type { EventTypeRegistry, ReversalSpec } from '../../journal/event-types.
 import { canonicalJson } from '../../shared/canonical.js';
 import { reject } from '../../shared/rejection.js';
 import type { KernelRegistry } from '../kernel-registry.js';
+import { frozenLegalSchema, legalSchema } from '../legal.js';
 import { registerRevertTypes } from '../revert.js';
 import { NOT_REGISTERED_TEXT, TOO_LATE, TOO_LATE_TEXT } from './registration.js';
 import { GIVEAWAY_EVENTS, type GiveawaySettings, type GiveawayState, type GiveawayStatus, type WinnerStatus } from './state.js';
@@ -21,6 +22,8 @@ const settingsSchema = z.object({
   winnersCount: z.int().min(1).max(100),
   claimDays: z.int().min(1).max(90),
   gates: z.array(z.looseObject({ id: z.enum(GATE_IDS) })),
+  // Optional: Ereignisse vor Teilprojekt 3 haben das Feld nicht. Der Reducer normalisiert auf null.
+  legal: legalSchema.nullable().optional(),
 });
 
 const pidSchema = z.object({ pid: z.uuid() });
@@ -85,6 +88,13 @@ export function registerGiveawayEvents(registry: EventTypeRegistry, kernels: Ker
         return { type: GIVEAWAY_EVENTS.settingsChanged, payload: { before: after, after: before } };
       },
     },
+  });
+
+  registry.register({
+    type: GIVEAWAY_EVENTS.legalFrozen,
+    version: 1,
+    schema: frozenLegalSchema,
+    reversal: { kind: 'none', why: 'Eingefrorene Rechtstexte sind ein Nachweis und bleiben.' },
   });
 
   registry.register({

@@ -6,6 +6,7 @@ import { reconcileKernelVersions } from '../framework/giveaway/projectors.js';
 import { RedisPublisher } from '../framework/publisher.js';
 import { createRuntime } from '../framework/runtime.js';
 import { accountAuthorizer } from '../identity/account/authorizer.js';
+import { accountLegalSource } from '../identity/account/legal-source.js';
 import { loadTokenKey } from '../identity/crypto.js';
 import { attachAccounts } from '../identity/runtime.js';
 import { twitchAuthClient } from '../identity/twitch.js';
@@ -26,7 +27,7 @@ async function main() {
   await ensurePartitions(pool, new Date(), 2);
   const redis = new Redis(config.redisUrl);
   const log = { error: (obj: object, msg: string) => console.error(JSON.stringify({ msg, ...obj })) };
-  const rt = createRuntime({ pool, publisher: new RedisPublisher(redis), auth: accountAuthorizer(), log });
+  const rt = createRuntime({ pool, publisher: new RedisPublisher(redis), auth: accountAuthorizer(), legalSource: accountLegalSource(), log });
   const accounts = attachAccounts(rt, { tokenKey });
   const twitch = twitchAuthClient({ clientId: config.twitchClientId, clientSecret: config.twitchClientSecret });
   const app = buildApp(

@@ -10,6 +10,7 @@ import type { TwitchUser } from '../../src/identity/identities.js';
 import { attachAccounts, type AccountHandlers } from '../../src/identity/runtime.js';
 import { REQUIRED_CHANNEL_SCOPES, TwitchError, type TwitchAuthClient } from '../../src/identity/twitch.js';
 import { AT, freshDb } from './db.js';
+import { fakeFetcher, fullLegalSource } from './giveaway.js';
 
 export const ALICE: TwitchUser = { id: '12345', login: 'alice', displayName: 'Alice' };
 export const BOB: TwitchUser = { id: '67890', login: 'bob', displayName: 'Bob' };
@@ -59,7 +60,7 @@ export interface ApiSetup {
 
 export async function setupApi(): Promise<ApiSetup> {
   const db = await freshDb();
-  const rt = createRuntime({ pool: db.pool, publisher: new InMemoryPublisher(), auth: allowAll, log: { error: vi.fn() } });
+  const rt = createRuntime({ pool: db.pool, publisher: new InMemoryPublisher(), auth: allowAll, log: { error: vi.fn() }, legalSource: fullLegalSource, fetcher: fakeFetcher });
   const accounts = attachAccounts(rt, { tokenKey: KEY });
   const twitch = stubTwitch();
   const clock = { now: AT };

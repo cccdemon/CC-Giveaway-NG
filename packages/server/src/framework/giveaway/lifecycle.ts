@@ -6,6 +6,7 @@ import { isRejection, reject, type Rejection } from '../../shared/rejection.js';
 import type { CommandHandler, StreamReducer } from '../command-bus.js';
 import { validateConfig } from '../kernel-config.js';
 import type { KernelRegistry } from '../kernel-registry.js';
+import { checkLegal } from '../legal.js';
 import { makeRevertHandler, type RevertCommand, type RevertPrepared } from '../revert.js';
 import { GIVEAWAY_NOT_FOUND, INVALID_ID, UUID_RE, authorizeControl, type GiveawayAuthorizer } from './authorize.js';
 import {
@@ -48,7 +49,7 @@ export type TransitionType =
   | 'cancel_giveaway'
   | 'complete_giveaway';
 
-const STATUS_LABEL: Record<GiveawayStatus, string> = {
+export const STATUS_LABEL: Record<GiveawayStatus, string> = {
   draft: 'Entwurf',
   open: 'Offen',
   paused: 'Pausiert',
@@ -94,6 +95,11 @@ function checkSettings(kernel: AnyKernel, s: GiveawaySettings): GiveawaySettings
   if (!Number.isInteger(s.claimDays) || s.claimDays < 1 || s.claimDays > 90) {
     return reject('invalid_claim_days', 'Die Meldefrist muss zwischen 1 und 90 Tagen liegen.');
   }
+  if (s.legal !== null) {
+    const legal = checkLegal(s.legal);
+    if (isRejection(legal)) return legal;
+    s = { ...s, legal };
+  }
   if (!Array.isArray(s.gates)) return INVALID_GATE();
   for (const g of s.gates as unknown[]) {
     if (typeof g !== 'object' || g === null || Array.isArray(g)) return INVALID_GATE();
@@ -132,6 +138,7 @@ export function createGiveawayHandler(d: GiveawayDeps): CommandHandler<CreateGiv
         winnersCount: s.winnersCount ?? 1,
         claimDays: s.claimDays ?? 14,
         gates: s.gates ?? [],
+        legal: s.legal ?? null,
       });
       if (isRejection(settings)) return settings;
       return [
@@ -188,6 +195,7 @@ export function changeSettingsHandler(d: GiveawayDeps): CommandHandler<ChangeSet
         winnersCount: s.winnersCount ?? before.winnersCount,
         claimDays: s.claimDays ?? before.claimDays,
         gates: s.gates ?? before.gates,
+        legal: s.legal === undefined ? before.legal : s.legal,
       });
       if (isRejection(after)) return after;
       if (canonicalJson(after) === canonicalJson(before)) return [];

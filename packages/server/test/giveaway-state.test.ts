@@ -88,7 +88,7 @@ describe('giveaway reducer', () => {
     expect(s.draws).toEqual([]);
     expect(s.winners).toEqual({});
     expect(s.kernelState).toBeNull();
-    expect(s.settings).toEqual({ config: {}, prize: '', sponsor: null, channels: [], winnersCount: 1, claimDays: 14, gates: [] });
+    expect(s.settings).toEqual({ config: {}, prize: '', sponsor: null, channels: [], winnersCount: 1, claimDays: 14, gates: [], legal: null });
   });
 
   it('created sets draft and kernel initial state', () => {
@@ -100,7 +100,8 @@ describe('giveaway reducer', () => {
     expect(s.teamId).toBe(TEAM);
     expect(s.kernelId).toBe('instant');
     expect(s.kernelVersionAtCreate).toBe(1);
-    expect(s.settings).toEqual(settings);
+    // Ereignisse vor Teilprojekt 3 haben kein legal. Der Reducer ergänzt null.
+    expect(s.settings).toEqual({ ...settings, legal: null });
     expect(s.status).toBe('draft');
     expect(s.kernelState).toEqual({ registered: [], window: null, windowsOpened: 0 });
   });
@@ -125,16 +126,16 @@ describe('giveaway reducer', () => {
   it('settings_changed replaces settings', () => {
     const after = { ...settings, prize: 'Neu' };
     const s = reduce([created(), rec(2, GIVEAWAY_EVENTS.settingsChanged, { before: settings, after })]);
-    expect(s.settings).toEqual(after);
+    expect(s.settings).toEqual({ ...after, legal: null });
   });
 
   it('registered and withdrawn maintain the registration list', () => {
     const s1 = reduce([created(), status(2, 'draft', 'open'), rec(3, GIVEAWAY_EVENTS.registered, { pid: P1 })]);
-    expect(s1.registered).toEqual({ [P1]: { since: AT.toISOString(), eventId: '3' } });
+    expect(s1.registered).toEqual({ [P1]: { since: AT.toISOString(), eventId: '3', legalEventId: null } });
     const s2 = reducer.apply(s1, rec(4, GIVEAWAY_EVENTS.withdrawn, { pid: P1 }));
     expect(s2.registered).toEqual({});
     expect((s2.kernelState as InstantState).registered).toEqual([]);
-    expect(s1.registered).toEqual({ [P1]: { since: AT.toISOString(), eventId: '3' } });
+    expect(s1.registered).toEqual({ [P1]: { since: AT.toISOString(), eventId: '3', legalEventId: null } });
   });
 
   it('drawn then voided falls back to closed and clears winners', () => {
@@ -294,14 +295,14 @@ describe('registerGiveawayEvents', () => {
     });
 
     const rgT = rec(4, GIVEAWAY_EVENTS.registered, { pid: P1 });
-    const current = { [P1]: { since: AT.toISOString(), eventId: '4' } };
+    const current = { [P1]: { since: AT.toISOString(), eventId: '4', legalEventId: null } };
     expect(rg.inverse(rgT, { ...base, status: 'open', registered: current })).toEqual({
       type: GIVEAWAY_EVENTS.withdrawn,
       payload: { pid: P1 },
     });
     const gone = rg.inverse(rgT, { ...base, status: 'open' });
     expect(isRejection(gone) && gone.code).toBe('not_registered');
-    const later = rg.inverse(rgT, { ...base, status: 'open', registered: { [P1]: { since: AT.toISOString(), eventId: '9' } } });
+    const later = rg.inverse(rgT, { ...base, status: 'open', registered: { [P1]: { since: AT.toISOString(), eventId: '9', legalEventId: null } } });
     expect(isRejection(later) && later.code).toBe('not_registered');
     const late = rg.inverse(rgT, { ...base, status: 'drawn', registered: current });
     expect(isRejection(late) && late.code).toBe('too_late');

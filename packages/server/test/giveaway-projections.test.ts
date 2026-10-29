@@ -150,7 +150,7 @@ describe('Lesetabellen des Giveaways', () => {
     await createOpen(rt);
     await openWindow(rt);
     await registerAll(rt, [P1]);
-    expect(await lastSeq(pool)).toBe(4);
+    expect(await lastSeq(pool)).toBe(5);
     expect(await loadSnapshot(pool, STREAM, { name: 'giveaway', version: rt.reducer.version })).not.toBeNull();
     const k2 = new KernelRegistry();
     k2.register({ ...instantKernel, version: 2 });

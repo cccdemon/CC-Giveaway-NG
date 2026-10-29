@@ -29,6 +29,8 @@ import {
   type GiveawayDeps,
 } from './giveaway/lifecycle.js';
 import { kernelCommandHandler, type KernelCommandCmd } from './giveaway/kernel-command.js';
+import { noProfile, openGiveawayHandler, type LegalSource, type OpenPrepared } from './giveaway/open.js';
+import { fetchHash, type LegalFetcher } from './legal.js';
 import { giveawaysProjector, participantsProjector, timersProjector } from './giveaway/projectors.js';
 import { registerHandler, withdrawHandler, type RegisterCmd } from './giveaway/registration.js';
 import { makeGiveawayReducer, type GiveawayState } from './giveaway/state.js';
@@ -47,6 +49,10 @@ export interface RuntimeOptions {
   log: BusLogger;
   kernels?: KernelRegistry;
   snapshotEvery?: number;
+  /** Rechtstexte aus dem Profil des Akteurs (NEW_DESIGN.md 9.4). Default: kein Profil. */
+  legalSource?: LegalSource;
+  /** Holt Rechtstext-URLs beim Öffnen und bildet den Hash. Default: fetchHash. */
+  fetcher?: LegalFetcher;
 }
 
 type Handler<C, P = undefined> = CommandHandler<C, GiveawayState, P>;
@@ -59,7 +65,7 @@ export interface Runtime {
   reducer: StreamReducer<GiveawayState>;
   handlers: {
     create: Handler<CreateGiveawayCmd>;
-    open: Handler<GiveawayCmd>;
+    open: Handler<GiveawayCmd, OpenPrepared>;
     pause: Handler<GiveawayCmd>;
     resume: Handler<GiveawayCmd>;
     close: Handler<GiveawayCmd>;
@@ -96,12 +102,9 @@ export function createRuntime(o: RuntimeOptions): Runtime {
     ...(o.snapshotEvery === undefined ? {} : { snapshotEvery: o.snapshotEvery }),
   });
   const d: GiveawayDeps = { kernels, auth: o.auth, reducer };
-  const dd: DrawDeps = {
-    ...d,
-    gates: o.gates ?? noGates,
-    rng: o.rng ?? csprng,
-    loadState: (c, stream) => loadStreamState(c, registry, stream, reducer),
-  };
+  const loadState = (c: pg.PoolClient, stream: string) => loadStreamState(c, registry, stream, reducer);
+  const dd: DrawDeps = { ...d, gates: o.gates ?? noGates, rng: o.rng ?? csprng, loadState };
+  const od = { ...d, legalSource: o.legalSource ?? noProfile, fetcher: o.fetcher ?? fetchHash, loadState };
   return {
     kernels,
     registry,
@@ -110,7 +113,7 @@ export function createRuntime(o: RuntimeOptions): Runtime {
     reducer,
     handlers: {
       create: createGiveawayHandler(d),
-      open: transitionHandler(d, 'open_giveaway'),
+      open: openGiveawayHandler(od),
       pause: transitionHandler(d, 'pause_giveaway'),
       resume: transitionHandler(d, 'resume_giveaway'),
       close: transitionHandler(d, 'close_giveaway'),

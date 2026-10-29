@@ -3,6 +3,7 @@ import { FRAMEWORK_EVENTS, type GateId, type KernelEvent, type Pid } from '../..
 import type { EventRecord, StreamId } from '../../journal/types.js';
 import type { StreamReducer } from '../command-bus.js';
 import type { KernelRegistry } from '../kernel-registry.js';
+import type { FrozenLegal, LegalTexts } from '../legal.js';
 import { EVENT_VOIDED } from '../revert.js';
 
 export type GiveawayStatus = 'draft' | 'open' | 'paused' | 'closed' | 'drawn' | 'completed' | 'cancelled';
@@ -21,6 +22,8 @@ export interface GiveawaySettings {
   winnersCount: number;
   claimDays: number;
   gates: GateConfig[];
+  /** Rechtstexte je Giveaway. null = die des Profils gelten (NEW_DESIGN.md 9.4). */
+  legal: LegalTexts | null;
 }
 
 export interface DrawRecord {
@@ -37,9 +40,13 @@ export interface GiveawayState {
   kernelVersionAtCreate: number;
   settings: GiveawaySettings;
   status: GiveawayStatus;
-  registered: Record<Pid, { since: string; eventId: string }>; // eventId = Ereignis der aktuellen Anmeldung
+  // eventId = Ereignis der aktuellen Anmeldung, legalEventId = Fassung der Rechtstexte zu diesem Zeitpunkt (6.4)
+  registered: Record<Pid, { since: string; eventId: string; legalEventId: string | null }>;
   draws: DrawRecord[];
   winners: Record<Pid, WinnerStatus>; // Gewinner der gültigen Ziehung(en)
+  /** Beim Öffnen eingefrorene Rechtstexte und das Ereignis dazu. */
+  legal: FrozenLegal | null;
+  legalEventId: string | null;
   kernelState: unknown;
 }
 
@@ -47,6 +54,7 @@ export const GIVEAWAY_EVENTS = {
   created: 'giveaway_created',
   statusChanged: 'giveaway_status_changed',
   settingsChanged: 'giveaway_settings_changed',
+  legalFrozen: 'giveaway_legal_frozen',
   drawn: 'giveaway_drawn',
   winnerStatusSet: 'winner_status_set',
   registered: FRAMEWORK_EVENTS.registered,
@@ -79,6 +87,11 @@ interface CreatedPayload {
   settings: GiveawaySettings;
 }
 
+/** Ereignisse vor Teilprojekt 3 haben kein legal. Der Zustand hat es immer. */
+function withLegal(s: GiveawaySettings): GiveawaySettings {
+  return { ...s, legal: s.legal ?? null };
+}
+
 function applyFramework(kernels: KernelRegistry, s: GiveawayState, e: EventRecord): GiveawayState {
   switch (e.type) {
     case GIVEAWAY_EVENTS.created: {
@@ -90,7 +103,7 @@ function applyFramework(kernels: KernelRegistry, s: GiveawayState, e: EventRecor
         teamId: p.teamId,
         kernelId: p.kernelId,
         kernelVersionAtCreate: p.kernelVersion,
-        settings: p.settings,
+        settings: withLegal(p.settings),
         status: 'draft',
         kernelState: kernel.initialState(p.settings.config),
       };
@@ -98,10 +111,12 @@ function applyFramework(kernels: KernelRegistry, s: GiveawayState, e: EventRecor
     case GIVEAWAY_EVENTS.statusChanged:
       return { ...s, status: (e.payload as { to: GiveawayStatus }).to };
     case GIVEAWAY_EVENTS.settingsChanged:
-      return { ...s, settings: (e.payload as { after: GiveawaySettings }).after };
+      return { ...s, settings: withLegal((e.payload as { after: GiveawaySettings }).after) };
+    case GIVEAWAY_EVENTS.legalFrozen:
+      return { ...s, legal: e.payload as FrozenLegal, legalEventId: e.id };
     case GIVEAWAY_EVENTS.registered: {
       const { pid } = e.payload as { pid: Pid };
-      return { ...s, registered: { ...s.registered, [pid]: { since: e.createdAt.toISOString(), eventId: e.id } } };
+      return { ...s, registered: { ...s.registered, [pid]: { since: e.createdAt.toISOString(), eventId: e.id, legalEventId: s.legalEventId } } };
     }
     case GIVEAWAY_EVENTS.withdrawn: {
       const { pid } = e.payload as { pid: Pid };
@@ -156,11 +171,13 @@ export function makeGiveawayReducer(kernels: KernelRegistry): StreamReducer<Give
       teamId: '',
       kernelId: '',
       kernelVersionAtCreate: 0,
-      settings: { config: {}, prize: '', sponsor: null, channels: [], winnersCount: 1, claimDays: 14, gates: [] },
+      settings: { config: {}, prize: '', sponsor: null, channels: [], winnersCount: 1, claimDays: 14, gates: [], legal: null },
       status: 'draft',
       registered: {},
       draws: [],
       winners: {},
+      legal: null,
+      legalEventId: null,
       kernelState: null,
     }),
     apply: (state, e) => applyKernel(kernels, applyFramework(kernels, state, e), e),

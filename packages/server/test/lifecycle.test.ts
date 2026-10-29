@@ -36,7 +36,7 @@ describe('Lebenszyklus', () => {
       teamId: TEAM,
       kernelId: 'instant',
       kernelVersion: 1,
-      settings: { config: { windowSec: 120 }, prize: 'Key', sponsor: null, channels: [P1], winnersCount: 1, claimDays: 14, gates: [] },
+      settings: { config: { windowSec: 120 }, prize: 'Key', sponsor: null, channels: [P1], winnersCount: 1, claimDays: 14, gates: [], legal: null },
     });
     const row = (await pool.query('SELECT * FROM giveaways WHERE id = $1', [GID])).rows[0];
     expect(row).toMatchObject({
@@ -89,7 +89,7 @@ describe('Lebenszyklus', () => {
     await must(rt, rt.handlers.create, createCmd());
     await must(rt, rt.handlers.open, { giveawayId: GID }, { now: at(60) });
     const row = (await pool.query('SELECT created_at, updated_at, last_seq FROM giveaways WHERE id = $1', [GID])).rows[0];
-    expect(row).toEqual({ created_at: at(0), updated_at: at(60), last_seq: 2 });
+    expect(row).toEqual({ created_at: at(0), updated_at: at(60), last_seq: 3 });
   });
 
   it('transitions follow the table', async () => {
@@ -117,7 +117,7 @@ describe('Lebenszyklus', () => {
       { from: 'open', to: 'closed' },
     ]);
     expect((await state(rt)).status).toBe('closed');
-    expect((await pool.query('SELECT status, last_seq FROM giveaways WHERE id = $1', [GID])).rows[0]).toEqual({ status: 'closed', last_seq: 7 });
+    expect((await pool.query('SELECT status, last_seq FROM giveaways WHERE id = $1', [GID])).rows[0]).toEqual({ status: 'closed', last_seq: 8 });
     const bad = await run(rt, h.pause, cmd);
     expect(bad).toEqual({ ok: false, rejection: { rejected: true, code: 'invalid_transition', message: 'Aus dem Zustand Geschlossen geht Pausieren nicht.' } });
   });

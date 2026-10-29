@@ -5,6 +5,7 @@ import { createPool } from '../db/pool.js';
 import type { BusLogger } from '../framework/command-bus.js';
 import { denyUsers } from '../framework/giveaway/authorize.js';
 import { RedisPublisher } from '../framework/publisher.js';
+import { accountLegalSource } from '../identity/account/legal-source.js';
 import { createRuntime } from '../framework/runtime.js';
 import { SchedulerLockError, acquireSchedulerLock } from './lock.js';
 import { scheduleLoop } from './loop.js';
@@ -42,7 +43,7 @@ async function main() {
     await migratePool.end();
   }
   const redis = new Redis(config.redisUrl);
-  const rt = createRuntime({ pool, publisher: new RedisPublisher(redis), auth: denyUsers, log });
+  const rt = createRuntime({ pool, publisher: new RedisPublisher(redis), auth: denyUsers, legalSource: accountLegalSource(), log });
 
   const maintenance = async () => {
     try {

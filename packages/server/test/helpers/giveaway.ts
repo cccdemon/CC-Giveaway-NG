@@ -8,6 +8,8 @@ import type { CreateGiveawayCmd } from '../../src/framework/giveaway/lifecycle.j
 import { loadStreamState } from '../../src/framework/state.js';
 import { InMemoryPublisher, type Publisher } from '../../src/framework/publisher.js';
 import { createRuntime, type Runtime, type RuntimeOptions } from '../../src/framework/runtime.js';
+import type { LegalSource } from '../../src/framework/giveaway/open.js';
+import type { LegalFetcher, LegalTexts } from '../../src/framework/legal.js';
 import type { Pid } from '../../src/kernel-api/index.js';
 import type { EventRecord } from '../../src/journal/types.js';
 import { AT, freshDb } from './db.js';
@@ -24,12 +26,18 @@ export const userOf = (pid: Pid) => `user:${pid}`;
 
 const pools = new WeakMap<Runtime, pg.Pool>();
 
+/** Vollständige Rechtstexte, als kämen sie aus dem Profil. Damit öffnet jedes Test-Giveaway ohne weiteres Zutun. */
+export const TEST_LEGAL: LegalTexts = { impressumUrl: 'https://test.example/impressum', terms: { text: 'Testregeln.' }, privacyUrl: 'https://test.example/datenschutz' };
+export const fullLegalSource: LegalSource = { profileOf: async () => TEST_LEGAL };
+/** Hash = 'h:' + URL. Kein Netz im Test. */
+export const fakeFetcher: LegalFetcher = async (url) => ({ ok: true, hash: `h:${url}` });
+
 export async function setupGiveaway(
   over: Partial<Omit<RuntimeOptions, 'pool' | 'publisher' | 'log'>> & { publisher?: Publisher } = {},
 ): Promise<{ pool: pg.Pool; rt: Runtime; publisher: InMemoryPublisher | Publisher; close(): Promise<void> }> {
   const db = await freshDb();
   const publisher = over.publisher ?? new InMemoryPublisher();
-  const rt = createRuntime({ auth: allowAll, log: { error: vi.fn() }, ...over, pool: db.pool, publisher });
+  const rt = createRuntime({ auth: allowAll, log: { error: vi.fn() }, legalSource: fullLegalSource, fetcher: fakeFetcher, ...over, pool: db.pool, publisher });
   pools.set(rt, db.pool);
   return { pool: db.pool, rt, publisher, close: db.close };
 }
