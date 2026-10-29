@@ -8,6 +8,13 @@ const schema = z.object({
   REDIS_URL: z.string({ message: 'Pflichtwert fehlt.' }).url({ message: 'Keine gültige URL.' }),
   PORT: z.coerce.number({ message: 'Keine Zahl.' }).int({ message: ZAHL_MSG }).min(1, { message: ZAHL_MSG }).max(65535, { message: ZAHL_MSG }).default(3000),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace'], { message: 'Erlaubt sind: fatal, error, warn, info, debug, trace.' }).default('info'),
+  TWITCH_CLIENT_ID: z.string({ message: 'Pflichtwert fehlt.' }).min(1, { message: 'Pflichtwert fehlt.' }),
+  TWITCH_CLIENT_SECRET: z.string({ message: 'Pflichtwert fehlt.' }).min(1, { message: 'Pflichtwert fehlt.' }),
+  PUBLIC_URL: z
+    .string({ message: 'Pflichtwert fehlt.' })
+    .url({ message: 'Keine gültige URL.' })
+    .transform((s) => s.replace(/\/+$/, '')),
+  TOKEN_KEY_FILE: z.string({ message: 'Pflichtwert fehlt.' }).min(1, { message: 'Pflichtwert fehlt.' }),
 });
 
 export interface Config {
@@ -16,6 +23,12 @@ export interface Config {
   redisUrl: string;
   port: number;
   logLevel: 'fatal' | 'error' | 'warn' | 'info' | 'debug' | 'trace';
+  twitchClientId: string;
+  twitchClientSecret: string;
+  /** Öffentliche Basis-URL ohne Schrägstrich am Ende, z. B. https://giveaway.example.org */
+  publicUrl: string;
+  /** Pfad zur Schlüsseldatei für Kanal-Tokens (64 Hex-Zeichen). */
+  tokenKeyFile: string;
 }
 
 export class ConfigError extends Error {
@@ -31,5 +44,15 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
     throw new ConfigError(parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`));
   }
   const v = parsed.data;
-  return { nodeEnv: v.NODE_ENV, databaseUrl: v.DATABASE_URL, redisUrl: v.REDIS_URL, port: v.PORT, logLevel: v.LOG_LEVEL };
+  return {
+    nodeEnv: v.NODE_ENV,
+    databaseUrl: v.DATABASE_URL,
+    redisUrl: v.REDIS_URL,
+    port: v.PORT,
+    logLevel: v.LOG_LEVEL,
+    twitchClientId: v.TWITCH_CLIENT_ID,
+    twitchClientSecret: v.TWITCH_CLIENT_SECRET,
+    publicUrl: v.PUBLIC_URL,
+    tokenKeyFile: v.TOKEN_KEY_FILE,
+  };
 }

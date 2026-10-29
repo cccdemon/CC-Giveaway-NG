@@ -4,6 +4,10 @@ import { ConfigError, loadConfig } from '../src/config/config.js';
 const valid = {
   DATABASE_URL: 'postgres://u:p@localhost:5433/ccg',
   REDIS_URL: 'redis://localhost:6380',
+  TWITCH_CLIENT_ID: 'cid',
+  TWITCH_CLIENT_SECRET: 'csecret',
+  PUBLIC_URL: 'https://giveaway.example.org/',
+  TOKEN_KEY_FILE: './secrets/token.key',
 };
 
 const problemsOf = (env: Record<string, string | undefined>): string[] => {
@@ -23,7 +27,16 @@ describe('loadConfig', () => {
       redisUrl: valid.REDIS_URL,
       port: 3000,
       logLevel: 'info',
+      twitchClientId: 'cid',
+      twitchClientSecret: 'csecret',
+      publicUrl: 'https://giveaway.example.org',
+      tokenKeyFile: './secrets/token.key',
     });
+  });
+
+  it('rejects an empty TWITCH_CLIENT_ID and a PUBLIC_URL that is no URL', () => {
+    expect(problemsOf({ ...valid, TWITCH_CLIENT_ID: '' }).join('\n')).toMatch(/TWITCH_CLIENT_ID/);
+    expect(problemsOf({ ...valid, PUBLIC_URL: 'giveaway' }).join('\n')).toMatch(/PUBLIC_URL: Keine gültige URL/);
   });
 
   it('coerces PORT', () => {
@@ -39,7 +52,7 @@ describe('loadConfig', () => {
     }
     expect(err).toBeInstanceOf(ConfigError);
     const problems = (err as ConfigError).problems;
-    expect(problems).toHaveLength(4);
+    expect(problems).toHaveLength(8);
     expect(problems.join('\n')).toMatch(/DATABASE_URL/);
     expect(problems.join('\n')).toMatch(/REDIS_URL/);
     expect(problems.join('\n')).toMatch(/PORT/);
