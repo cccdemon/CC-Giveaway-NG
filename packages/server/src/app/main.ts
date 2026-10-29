@@ -2,10 +2,10 @@ import { Redis } from 'ioredis';
 import { ConfigError, loadConfig } from '../config/config.js';
 import { runMigrations } from '../db/migrate.js';
 import { createPool } from '../db/pool.js';
-import { denyUsers } from '../framework/giveaway/authorize.js';
 import { reconcileKernelVersions } from '../framework/giveaway/projectors.js';
 import { RedisPublisher } from '../framework/publisher.js';
 import { createRuntime } from '../framework/runtime.js';
+import { accountAuthorizer } from '../identity/account/authorizer.js';
 import { loadTokenKey } from '../identity/crypto.js';
 import { attachAccounts } from '../identity/runtime.js';
 import { twitchAuthClient } from '../identity/twitch.js';
@@ -26,7 +26,7 @@ async function main() {
   await ensurePartitions(pool, new Date(), 2);
   const redis = new Redis(config.redisUrl);
   const log = { error: (obj: object, msg: string) => console.error(JSON.stringify({ msg, ...obj })) };
-  const rt = createRuntime({ pool, publisher: new RedisPublisher(redis), auth: denyUsers, log });
+  const rt = createRuntime({ pool, publisher: new RedisPublisher(redis), auth: accountAuthorizer(), log });
   const accounts = attachAccounts(rt, { tokenKey });
   const twitch = twitchAuthClient({ clientId: config.twitchClientId, clientSecret: config.twitchClientSecret });
   const app = buildApp(

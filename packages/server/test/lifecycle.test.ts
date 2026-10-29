@@ -179,7 +179,7 @@ describe('Lebenszyklus', () => {
     const denied = await run(rt, rt.handlers.create, createCmd(), { actor: STREAMER });
     expect(denied).toEqual({
       ok: false,
-      rejection: { rejected: true, code: 'no_accounts', message: 'Konten gibt es noch nicht. Dieser Befehl ist erst ab Teilprojekt 3 möglich.' },
+      rejection: { rejected: true, code: 'no_accounts', message: 'Dieser Prozess nimmt keine Nutzerbefehle an. Nutze die App.' },
     });
     expect((await pool.query('SELECT count(*)::int AS n FROM stream_heads')).rows[0].n).toBe(0);
     expect(await code(run(rt, rt.handlers.create, createCmd(), { actor: 'system:scheduler' }))).toBe('ok');

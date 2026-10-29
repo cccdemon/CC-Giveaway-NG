@@ -16,11 +16,10 @@ export const allowAll: GiveawayAuthorizer = {
   controls: async () => null,
 };
 
+/** Nur Systembefehle, z. B. im Scheduler-Prozess. Nutzerbefehle laufen über die app mit accountAuthorizer. */
 export const denyUsers: GiveawayAuthorizer = {
   controls: async (_c, actor) =>
-    actor.startsWith('system:')
-      ? null
-      : reject('no_accounts', 'Konten gibt es noch nicht. Dieser Befehl ist erst ab Teilprojekt 3 möglich.'),
+    actor.startsWith('system:') ? null : reject('no_accounts', 'Dieser Prozess nimmt keine Nutzerbefehle an. Nutze die App.'),
 };
 
 export interface GiveawayRow {
