@@ -1,9 +1,12 @@
-// Rechte-Schnittstelle für Giveaway-Befehle. Konten kommen erst in Teilprojekt 3.
+// Rechte-Schnittstelle für Giveaway-Befehle. Die Umsetzung auf Basis der Konten liegt in identity/account/authorizer.ts.
 import type pg from 'pg';
 import type { Actor } from '../../journal/types.js';
 import { reject, type Rejection } from '../../shared/rejection.js';
+import { UUID_RE } from '../authorize.js';
 import type { CommandContext } from '../command-bus.js';
 import type { GiveawayStatus } from './state.js';
+
+export { INVALID_ID, UUID_RE, authorizeSelf } from '../authorize.js';
 
 export interface GiveawayAuthorizer {
   controls(c: pg.PoolClient, actor: Actor, teamId: string): Promise<Rejection | null>;
@@ -27,9 +30,6 @@ export interface GiveawayRow {
   status: GiveawayStatus;
 }
 
-/** Wie z.uuid() im Ereignisschema: Version 1–8, Variante 8–b. */
-export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
 /** Liest die Lesetabelle `giveaways`. Keine UUID oder keine Zeile → null. */
 export async function loadGiveawayRow(c: pg.PoolClient, giveawayId: string): Promise<GiveawayRow | null> {
   if (!UUID_RE.test(giveawayId)) return null;
@@ -42,14 +42,6 @@ export async function loadGiveawayRow(c: pg.PoolClient, giveawayId: string): Pro
 }
 
 export const GIVEAWAY_NOT_FOUND = (): Rejection => reject('giveaway_not_found', 'Dieses Giveaway gibt es nicht.');
-export const INVALID_ID = (): Rejection => reject('invalid_id', 'Die ID ist keine gültige UUID.');
-
-/** Teilnehmer-Befehle: nur der Teilnehmer selbst. pid muss eine UUID sein. */
-export function authorizeSelf(pid: unknown, actor: Actor, text = 'Du kannst nur dich selbst anmelden oder abmelden.'): Rejection | null {
-  if (typeof pid !== 'string' || !UUID_RE.test(pid)) return INVALID_ID();
-  if (actor === `user:${pid}`) return null;
-  return reject('not_you', text);
-}
 
 export function authorizeControl(
   auth: GiveawayAuthorizer,
