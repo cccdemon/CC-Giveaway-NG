@@ -1,5 +1,6 @@
 // Baut Registry, Projektionen, Reducer, CommandBus und alle Giveaway-Handler aus einer Hand.
 import type pg from 'pg';
+import type { Queryable } from '../db/pool.js';
 import { EventTypeRegistry } from '../journal/event-types.js';
 import { CommandBus, type BusLogger, type CommandHandler, type StreamReducer } from './command-bus.js';
 import type { GiveawayAuthorizer } from './giveaway/authorize.js';
@@ -29,7 +30,7 @@ import {
   type GiveawayDeps,
 } from './giveaway/lifecycle.js';
 import { kernelCommandHandler, type KernelCommandCmd } from './giveaway/kernel-command.js';
-import { noProfile, openGiveawayHandler, type LegalSource, type OpenPrepared } from './giveaway/open.js';
+import { noProfile, openGiveawayHandler, type LegalSource, type OpenPre, type OpenPrepared } from './giveaway/open.js';
 import { fetchHash, type LegalFetcher } from './legal.js';
 import { giveawaysProjector, participantsProjector, timersProjector } from './giveaway/projectors.js';
 import { registerHandler, withdrawHandler, type RegisterCmd } from './giveaway/registration.js';
@@ -55,7 +56,7 @@ export interface RuntimeOptions {
   fetcher?: LegalFetcher;
 }
 
-type Handler<C, P = undefined> = CommandHandler<C, GiveawayState, P>;
+type Handler<C, P = undefined, Q = undefined> = CommandHandler<C, GiveawayState, P, Q>;
 
 export interface Runtime {
   kernels: KernelRegistry;
@@ -65,7 +66,7 @@ export interface Runtime {
   reducer: StreamReducer<GiveawayState>;
   handlers: {
     create: Handler<CreateGiveawayCmd>;
-    open: Handler<GiveawayCmd, OpenPrepared>;
+    open: Handler<GiveawayCmd, OpenPrepared, OpenPre>;
     pause: Handler<GiveawayCmd>;
     resume: Handler<GiveawayCmd>;
     close: Handler<GiveawayCmd>;
@@ -102,7 +103,7 @@ export function createRuntime(o: RuntimeOptions): Runtime {
     ...(o.snapshotEvery === undefined ? {} : { snapshotEvery: o.snapshotEvery }),
   });
   const d: GiveawayDeps = { kernels, auth: o.auth, reducer };
-  const loadState = (c: pg.PoolClient, stream: string) => loadStreamState(c, registry, stream, reducer);
+  const loadState = (c: Queryable, stream: string) => loadStreamState(c, registry, stream, reducer);
   const dd: DrawDeps = { ...d, gates: o.gates ?? noGates, rng: o.rng ?? csprng, loadState };
   const od = { ...d, legalSource: o.legalSource ?? noProfile, fetcher: o.fetcher ?? fetchHash, loadState };
   return {

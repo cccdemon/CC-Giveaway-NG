@@ -199,6 +199,10 @@ export function changeSettingsHandler(d: GiveawayDeps): CommandHandler<ChangeSet
       });
       if (isRejection(after)) return after;
       if (canonicalJson(after) === canonicalJson(before)) return [];
+      // Der eingefrorene Nachweis (9.4) darf nicht still von den sichtbaren Texten abweichen.
+      if (state.status !== 'draft' && canonicalJson(after.legal) !== canonicalJson(before.legal)) {
+        return reject('legal_locked', 'Die Rechtstexte sind seit dem Öffnen eingefroren. Für neue Texte lege ein neues Giveaway an.');
+      }
       return [{ type: GIVEAWAY_EVENTS.settingsChanged, payload: { before, after } }];
     },
   };

@@ -36,7 +36,8 @@ export function accountsProjector(): StateProjector<AccountState> {
 
 /**
  * Löschung entfernt identities, sessions und channel_tokens (NEW_DESIGN.md 12.4). Kanal trennen entfernt die Tokens.
- * Beides passiert in der Transaktion des Befehls. Neuaufbau ist harmlos: Die Zeilen sind dann längst weg.
+ * Beides passiert in der Transaktion des Befehls. Beim Neuaufbau laufen alte Ereignisse erneut: Ein altes
+ * channel_disconnected darf den Token einer späteren Verbindung nicht löschen, darum prüft es auf ein späteres channel_connected.
  */
 export function identityCleanupProjector(): Projector {
   return {
@@ -45,6 +46,12 @@ export function identityCleanupProjector(): Projector {
     async apply(c: pg.PoolClient, e: EventRecord) {
       const pid = pidOfStream(e.stream);
       if (pid === null) return;
+      if (e.type === ACCOUNT_EVENTS.channelDisconnected) {
+        const later = await c.query('SELECT 1 FROM events WHERE stream = $1 AND seq > $2 AND type = $3 LIMIT 1', [
+          e.stream, e.seq, ACCOUNT_EVENTS.channelConnected,
+        ]);
+        if ((later.rowCount ?? 0) > 0) return;
+      }
       await deleteChannelToken(c, pid);
       if (e.type === ACCOUNT_EVENTS.deleted) {
         await deleteIdentity(c, pid);

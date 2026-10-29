@@ -39,7 +39,7 @@ async function setup() {
   return { ...s, accounts };
 }
 
-async function run<C, S, P>(rt: Runtime, h: CommandHandler<C, S, P>, cmd: C, over: Partial<CommandContext> = {}): Promise<CommandResult> {
+async function run<C, S, P, Q>(rt: Runtime, h: CommandHandler<C, S, P, Q>, cmd: C, over: Partial<CommandContext> = {}): Promise<CommandResult> {
   return rt.bus.execute(h, cmd, ctx({ actor: me(PID), ...over }));
 }
 
@@ -48,7 +48,7 @@ async function code(p: Promise<CommandResult>): Promise<string> {
   return r.ok ? 'ok' : r.rejection.code;
 }
 
-async function must<C, S, P>(rt: Runtime, h: CommandHandler<C, S, P>, cmd: C, over: Partial<CommandContext> = {}) {
+async function must<C, S, P, Q>(rt: Runtime, h: CommandHandler<C, S, P, Q>, cmd: C, over: Partial<CommandContext> = {}) {
   const r = await run(rt, h, cmd, over);
   if (!r.ok) throw new Error(`${h.type} abgelehnt: ${r.rejection.code}: ${r.rejection.message}`);
   return r.events;

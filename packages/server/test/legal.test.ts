@@ -210,13 +210,13 @@ describe('fetchHash', () => {
         res.end('nein');
       }
     });
-    expect(await fetchHash(`${base}/impressum`)).toEqual({ ok: true, hash: createHash('sha256').update('<p>Impressum</p>').digest('hex') });
-    expect(await fetchHash(`${base}/fehlt`)).toEqual({ ok: false });
-    expect(await fetchHash('http://127.0.0.1:1/zu')).toEqual({ ok: false });
+    expect(await fetchHash(`${base}/impressum`, { allowPrivate: true })).toEqual({ ok: true, hash: createHash('sha256').update('<p>Impressum</p>').digest('hex') });
+    expect(await fetchHash(`${base}/fehlt`, { allowPrivate: true })).toEqual({ ok: false });
+    expect(await fetchHash('http://127.0.0.1:1/zu', { allowPrivate: true })).toEqual({ ok: false });
   });
 
   it('gives up after the timeout', async () => {
     const base = await serve(() => undefined);
-    expect(await fetchHash(`${base}/haengt`, { timeoutMs: 200 })).toEqual({ ok: false });
+    expect(await fetchHash(`${base}/haengt`, { timeoutMs: 200, allowPrivate: true })).toEqual({ ok: false });
   });
 });

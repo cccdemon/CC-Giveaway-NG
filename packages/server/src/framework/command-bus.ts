@@ -1,6 +1,6 @@
 import type pg from 'pg';
 import { logDenied } from '../audit/access-log.js';
-import { withTx } from '../db/pool.js';
+import { withTx, type Queryable } from '../db/pool.js';
 import type { EventTypeRegistry } from '../journal/event-types.js';
 import { appendLocked, lockStream } from '../journal/journal.js';
 import { ensurePartitions, isMissingPartition } from '../journal/partitions.js';
@@ -26,14 +26,20 @@ export interface CommandContext {
   ip?: string | null;
 }
 
-export interface CommandHandler<C, S, P = undefined> {
+export interface CommandHandler<C, S, P = undefined, Q = undefined> {
   type: string;
   streamOf(cmd: C): StreamId;
   reducer: StreamReducer<S>;
+  /**
+   * VOR der Transaktion, ohne Sperre, einmal je execute (nicht je Wiederholung). Für Netz-I/O wie Twitch oder
+   * Rechtstext-URLs, das nie eine Verbindung aus dem Pool blockieren darf. Das Ergebnis geht an prepare,
+   * das es gegen den gesperrten Zustand prüft.
+   */
+  pre?(cmd: C, ctx: CommandContext, db: Queryable): Promise<Q>;
   /** In der Transaktion, VOR der Stromsperre. Darf lesen. */
   authorize(cmd: C, ctx: CommandContext, c: pg.PoolClient): Rejection | null | Promise<Rejection | null>;
-  /** Läuft nach der Stromsperre in derselben Transaktion. Für Daten, die nicht im Reducer-Zustand stehen. */
-  prepare?(c: pg.PoolClient, cmd: C, ctx: CommandContext): Promise<P>;
+  /** Läuft nach der Stromsperre in derselben Transaktion. Für Daten, die nicht im Reducer-Zustand stehen. Kein Netz-I/O. */
+  prepare?(c: pg.PoolClient, cmd: C, ctx: CommandContext, pre: Q): Promise<P>;
   decide(state: S, cmd: C, ctx: CommandContext, prepared: P): NewEvent[] | Rejection;
 }
 
@@ -67,13 +73,14 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-
 export class CommandBus {
   constructor(private readonly d: CommandBusDeps) {}
 
-  async execute<C, S, P>(h: CommandHandler<C, S, P>, cmd: C, ctx: CommandContext): Promise<CommandResult> {
+  async execute<C, S, P, Q>(h: CommandHandler<C, S, P, Q>, cmd: C, ctx: CommandContext): Promise<CommandResult> {
     if (!UUID_RE.test(ctx.correlationId)) {
       throw new TypeError(`Die correlationId "${ctx.correlationId}" ist keine UUID. Erzeuge sie mit randomUUID().`);
     }
+    const pre = h.pre ? await h.pre(cmd, ctx, this.d.pool) : (undefined as Q);
     for (let attempt = 0; ; attempt++) {
       try {
-        const out = await withTx(this.d.pool, (c) => this.runOnce(h, cmd, ctx, c));
+        const out = await withTx(this.d.pool, (c) => this.runOnce(h, cmd, ctx, c, pre));
         if (out.length > 0) await this.publishSafe(h.streamOf(cmd), out);
         return { ok: true, events: out };
       } catch (e) {
@@ -93,13 +100,13 @@ export class CommandBus {
     return loadStreamState(c, this.d.registry, stream, reducer);
   }
 
-  private async runOnce<C, S, P>(h: CommandHandler<C, S, P>, cmd: C, ctx: CommandContext, c: pg.PoolClient): Promise<EventRecord[]> {
+  private async runOnce<C, S, P, Q>(h: CommandHandler<C, S, P, Q>, cmd: C, ctx: CommandContext, c: pg.PoolClient, pre: Q): Promise<EventRecord[]> {
     const denied = await h.authorize(cmd, ctx, c);
     if (denied) throw new RejectionSignal(denied);
     const stream = h.streamOf(cmd);
     const lastSeq = await lockStream(c, stream);
     const state = await this.loadState(c, stream, h.reducer);
-    const prepared = h.prepare ? await h.prepare(c, cmd, ctx) : (undefined as P);
+    const prepared = h.prepare ? await h.prepare(c, cmd, ctx, pre) : (undefined as P);
     const decided = h.decide(state, cmd, ctx, prepared);
     if (isRejection(decided)) throw new RejectionSignal(decided);
     const events = await appendLocked(c, this.d.registry, {
@@ -119,7 +126,7 @@ export class CommandBus {
     await saveSnapshot(c, stream, reducer, newSeq, next, now);
   }
 
-  private async deny<C, S, P>(h: CommandHandler<C, S, P>, cmd: C, ctx: CommandContext, rejection: Rejection): Promise<CommandResult> {
+  private async deny<C, S, P, Q>(h: CommandHandler<C, S, P, Q>, cmd: C, ctx: CommandContext, rejection: Rejection): Promise<CommandResult> {
     let target: string | null = null;
     try {
       target = h.streamOf(cmd);

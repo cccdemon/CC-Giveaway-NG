@@ -1,9 +1,11 @@
 // Öffnen eines Giveaways (NEW_DESIGN.md 9.4): ohne Impressum, Teilnahmebedingungen und Datenschutzhinweis öffnet nichts.
 // Beim Übergang Entwurf → Offen friert der Rahmen die Fassung ein: Text als Kopie, URL mit Hash des Inhalts.
-import type pg from 'pg';
+// Die URLs holt `pre` außerhalb der Transaktion. `prepare` prüft in der Sperre, dass die Texte noch dieselben sind.
+import type { Queryable } from '../../db/pool.js';
 import type { Actor, StreamId } from '../../journal/types.js';
-import { reject, type Rejection } from '../../shared/rejection.js';
-import type { CommandHandler } from '../command-bus.js';
+import { canonicalJson } from '../../shared/canonical.js';
+import { reject } from '../../shared/rejection.js';
+import type { CommandContext, CommandHandler } from '../command-bus.js';
 import { mergeLegal, missingLegal, type FrozenLegal, type LegalFetcher, type LegalTexts } from '../legal.js';
 import { GIVEAWAY_NOT_FOUND, authorizeControl } from './authorize.js';
 import { STATUS_LABEL, type GiveawayCmd, type GiveawayDeps } from './lifecycle.js';
@@ -11,7 +13,7 @@ import { GIVEAWAY_EVENTS, giveawayStream, type GiveawayState } from './state.js'
 
 /** Rechtstexte aus dem Profil des Akteurs. Systemakteure haben keins. */
 export interface LegalSource {
-  profileOf(c: pg.PoolClient, actor: Actor): Promise<LegalTexts | null>;
+  profileOf(db: Queryable, actor: Actor): Promise<LegalTexts | null>;
 }
 
 export const noProfile: LegalSource = { profileOf: async () => null };
@@ -19,16 +21,19 @@ export const noProfile: LegalSource = { profileOf: async () => null };
 export interface OpenDeps extends GiveawayDeps {
   legalSource: LegalSource;
   fetcher: LegalFetcher;
-  loadState(c: pg.PoolClient, stream: StreamId): Promise<GiveawayState>;
+  loadState(db: Queryable, stream: StreamId): Promise<GiveawayState>;
 }
 
-export type OpenPrepared =
+/** Ergebnis von pre (außerhalb der Sperre). `merged` ist die Fassung, zu der die Hashes gehören. */
+export type OpenPre =
   | { kind: 'skip' }
   | { kind: 'missing'; names: string[] }
   | { kind: 'unreachable'; url: string }
-  | { kind: 'ready'; frozen: FrozenLegal };
+  | { kind: 'ready'; merged: LegalTexts; frozen: FrozenLegal };
 
-async function freeze(fetcher: LegalFetcher, legal: LegalTexts, at: string): Promise<OpenPrepared> {
+export type OpenPrepared = OpenPre | { kind: 'changed' };
+
+async function freeze(fetcher: LegalFetcher, legal: LegalTexts, at: string): Promise<OpenPre> {
   const hashed = async (url: string): Promise<{ url: string; hash: string } | null> => {
     const r = await fetcher(url);
     return r.ok ? { url, hash: r.hash } : null;
@@ -45,24 +50,33 @@ async function freeze(fetcher: LegalFetcher, legal: LegalTexts, at: string): Pro
   }
   const privacy = await hashed(legal.privacyUrl!);
   if (!privacy) return { kind: 'unreachable', url: legal.privacyUrl! };
-  return { kind: 'ready', frozen: { impressum, terms, privacy, frozenAt: at } };
+  return { kind: 'ready', merged: legal, frozen: { impressum, terms, privacy, frozenAt: at } };
 }
 
-export function openGiveawayHandler(d: OpenDeps): CommandHandler<GiveawayCmd, GiveawayState, OpenPrepared> {
+export function openGiveawayHandler(d: OpenDeps): CommandHandler<GiveawayCmd, GiveawayState, OpenPrepared, OpenPre> {
+  const mergedFor = async (db: Queryable, cmd: GiveawayCmd, ctx: CommandContext): Promise<{ state: GiveawayState; merged: LegalTexts }> => {
+    const state = await d.loadState(db, giveawayStream(cmd.giveawayId));
+    return { state, merged: mergeLegal(state.settings.legal, await d.legalSource.profileOf(db, ctx.actor)) };
+  };
   return {
     type: 'open_giveaway',
     streamOf: (cmd) => giveawayStream(cmd.giveawayId),
     reducer: d.reducer,
     authorize: authorizeControl(d.auth),
-    async prepare(c, cmd, ctx) {
-      const state = await d.loadState(c, giveawayStream(cmd.giveawayId));
+    async pre(cmd, ctx, db) {
+      const { state, merged } = await mergedFor(db, cmd, ctx);
       if (!state.exists || state.status !== 'draft') return { kind: 'skip' };
-      const merged = mergeLegal(state.settings.legal, await d.legalSource.profileOf(c, ctx.actor));
       const names = missingLegal(merged);
       if (names.length > 0) return { kind: 'missing', names };
       return freeze(d.fetcher, merged, ctx.now.toISOString());
     },
-    decide(state, _cmd, _ctx, prepared): Rejection | ReturnType<CommandHandler<GiveawayCmd, GiveawayState, OpenPrepared>['decide']> {
+    async prepare(c, cmd, ctx, pre) {
+      if (pre.kind !== 'ready') return pre;
+      // Hat sich zwischen Abruf und Sperre etwas geändert, passt der Nachweis nicht mehr zu den Texten.
+      const { merged } = await mergedFor(c, cmd, ctx);
+      return canonicalJson(merged) === canonicalJson(pre.merged) ? pre : { kind: 'changed' };
+    },
+    decide(state, _cmd, _ctx, prepared) {
       if (!state.exists) return GIVEAWAY_NOT_FOUND();
       if (state.status !== 'draft') return reject('invalid_transition', `Aus dem Zustand ${STATUS_LABEL[state.status]} geht Öffnen nicht.`);
       switch (prepared.kind) {
@@ -70,14 +84,16 @@ export function openGiveawayHandler(d: OpenDeps): CommandHandler<GiveawayCmd, Gi
           return reject('legal_required', `Hinterlege zuerst: ${prepared.names.join(', ')}.`);
         case 'unreachable':
           return reject('legal_unreachable', `Die Seite ${prepared.url} ist nicht erreichbar. Prüfe den Link.`);
+        case 'changed':
+          return reject('legal_changed', 'Die Rechtstexte haben sich gerade geändert. Öffne erneut.');
         case 'ready':
           return [
             { type: GIVEAWAY_EVENTS.legalFrozen, payload: prepared.frozen },
             { type: GIVEAWAY_EVENTS.statusChanged, payload: { from: 'draft', to: 'open' } },
           ];
         case 'skip':
-          // prepare sah einen anderen Zustand als decide. Beide lesen in derselben Sperre, das kommt nicht vor.
-          return reject('invalid_transition', 'Der Zustand hat sich geändert. Versuche es noch einmal.');
+          // pre sah das Giveaway nicht im Entwurf, jetzt ist es dort: Zustand hat sich geändert, erneut versuchen.
+          return reject('legal_changed', 'Die Rechtstexte haben sich gerade geändert. Öffne erneut.');
       }
     },
   };

@@ -42,11 +42,11 @@ export async function setupGiveaway(
   return { pool: db.pool, rt, publisher, close: db.close };
 }
 
-export async function run<C, S, P>(rt: Runtime, h: CommandHandler<C, S, P>, cmd: C, over: Partial<CommandContext> = {}): Promise<CommandResult> {
+export async function run<C, S, P, Q>(rt: Runtime, h: CommandHandler<C, S, P, Q>, cmd: C, over: Partial<CommandContext> = {}): Promise<CommandResult> {
   return rt.bus.execute(h, cmd, ctx({ actor: STREAMER, ...over }));
 }
 
-export async function must<C, S, P>(rt: Runtime, h: CommandHandler<C, S, P>, cmd: C, over: Partial<CommandContext> = {}): Promise<EventRecord[]> {
+export async function must<C, S, P, Q>(rt: Runtime, h: CommandHandler<C, S, P, Q>, cmd: C, over: Partial<CommandContext> = {}): Promise<EventRecord[]> {
   const r = await run(rt, h, cmd, over);
   if (!r.ok) throw new Error(`${h.type} abgelehnt: ${r.rejection.code}: ${r.rejection.message}`);
   return r.events;
