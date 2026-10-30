@@ -1,0 +1,4 @@
+{
+  "metadata": { "message_id": "9b5d6a2e-3d7e-4c3a-9c6b-1f2d3e4a5b6c", "message_type": "session_reconnect", "message_timestamp": "2026-10-15T12:05:00.000Z" },
+  "payload": { "session": { "id": "AQoQILE98gtqShGmLD7AM6yJThAB", "status": "reconnecting", "keepalive_timeout_seconds": null, "reconnect_url": "wss://eventsub.wss.twitch.tv/ws?challenge=beispiel&id=AQoQILE98gtqShGmLD7AM6yJThAB", "connected_at": "2026-10-15T12:00:00.000Z" } }
+}

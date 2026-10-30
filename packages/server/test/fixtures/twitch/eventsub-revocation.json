@@ -1,0 +1,6 @@
+{
+  "metadata": { "message_id": "f6d4a8b0-1c2e-4d5f-e9a7-b8c9d0e1f2a3", "message_type": "revocation", "message_timestamp": "2026-10-15T12:10:00.000Z", "subscription_type": "channel.chat.message", "subscription_version": "1" },
+  "payload": {
+    "subscription": { "id": "26b1c993-bfcf-44d9-b876-379dacafe75a", "status": "authorization_revoked", "type": "channel.chat.message", "version": "1", "condition": { "broadcaster_user_id": "1001", "user_id": "999" }, "transport": { "method": "conduit", "conduit_id": "bfcfc993-26b1-b876-44d9-afe75a379dac" }, "created_at": "2026-10-15T12:00:00.000Z", "cost": 0 }
+  }
+}

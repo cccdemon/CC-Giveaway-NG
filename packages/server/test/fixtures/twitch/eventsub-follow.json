@@ -1,0 +1,7 @@
+{
+  "metadata": { "message_id": "e5c3f7a9-0b1d-4c4e-d8f6-a7b8c9d0e1f2", "message_type": "notification", "message_timestamp": "2026-10-15T12:00:30.000Z", "subscription_type": "channel.follow", "subscription_version": "2" },
+  "payload": {
+    "subscription": { "id": "b3c4d5e6-7f8a-4b9c-0d1e-2f3a4b5c6d7e", "status": "enabled", "type": "channel.follow", "version": "2", "condition": { "broadcaster_user_id": "1001", "moderator_user_id": "1001" }, "transport": { "method": "conduit", "conduit_id": "bfcfc993-26b1-b876-44d9-afe75a379dac" }, "created_at": "2026-10-15T12:00:00.000Z", "cost": 0 },
+    "event": { "user_id": "67890", "user_login": "bob", "user_name": "Bob", "broadcaster_user_id": "1001", "broadcaster_user_login": "alice", "broadcaster_user_name": "Alice", "followed_at": "2026-10-15T12:00:30.000Z" }
+  }
+}

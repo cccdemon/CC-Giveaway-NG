@@ -1,0 +1,13 @@
+{
+  "metadata": { "message_id": "befa7b53-d79d-478f-86b9-120f112b044e", "message_type": "notification", "message_timestamp": "2026-10-15T12:00:30.000Z", "subscription_type": "channel.chat.message", "subscription_version": "1" },
+  "payload": {
+    "subscription": { "id": "26b1c993-bfcf-44d9-b876-379dacafe75a", "status": "enabled", "type": "channel.chat.message", "version": "1", "condition": { "broadcaster_user_id": "1001", "user_id": "999" }, "transport": { "method": "conduit", "conduit_id": "bfcfc993-26b1-b876-44d9-afe75a379dac" }, "created_at": "2026-10-15T12:00:00.000Z", "cost": 0 },
+    "event": {
+      "broadcaster_user_id": "1001", "broadcaster_user_login": "alice", "broadcaster_user_name": "Alice",
+      "chatter_user_id": "12345", "chatter_user_login": "alice", "chatter_user_name": "Alice",
+      "message_id": "cc106a89-1814-919d-454c-f4f2f970aae7",
+      "message": { "text": "Hallo zusammen!", "fragments": [ { "type": "text", "text": "Hallo zusammen!", "cheermote": null, "emote": null, "mention": null } ] },
+      "color": "#FF0000", "badges": [], "message_type": "text", "cheer": null, "reply": null, "channel_points_custom_reward_id": null, "source_broadcaster_user_id": null
+    }
+  }
+}
