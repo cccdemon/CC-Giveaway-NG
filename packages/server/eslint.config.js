@@ -28,4 +28,14 @@ export default tseslint.config(
       }],
     },
   },
+  {
+    files: ['src/ingest/**/*.ts'],
+    rules: {
+      'no-restricted-imports': ['error', {
+        patterns: [
+          { regex: '^(\\.\\./)+journal/journal(\\.js)?$', message: 'Der Ingest schreibt nie ins Journal. Er sendet Befehle (NEW_DESIGN.md 3.4).' },
+        ],
+      }],
+    },
+  },
 );

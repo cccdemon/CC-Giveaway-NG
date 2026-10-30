@@ -50,3 +50,13 @@ describe('Modulgrenzen (NEW_DESIGN.md 3.4)', () => {
     expect(await restricted('src/kernel-api/index.ts', "import { z } from 'zod';\nexport const y = z;\n")).toBe(true);
   });
 });
+
+describe('Ingest (NEW_DESIGN.md 3.4)', () => {
+  it('ingest darf journal/journal nicht importieren', async () => {
+    expect(await restricted('src/ingest/x.ts', "import { appendLocked } from '../journal/journal.js';\nexport const y = appendLocked;\n")).toBe(true);
+    expect(await restricted('src/ingest/twitch/x.ts', "import { appendLocked } from '../../journal/journal.js';\nexport const y = appendLocked;\n")).toBe(true);
+  });
+  it('ingest darf framework und identity importieren', async () => {
+    expect(await restricted('src/ingest/x.ts', "import { createRuntime } from '../framework/runtime.js';\nimport { loadChannelToken } from '../identity/tokens.js';\nexport const y = [createRuntime, loadChannelToken];\n")).toBe(false);
+  });
+});
