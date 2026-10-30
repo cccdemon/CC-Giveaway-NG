@@ -1,0 +1,1 @@
+{ "data": [ { "user_id": "12345", "user_login": "alice", "user_name": "Alice" }, { "user_id": "67890", "user_login": "bob", "user_name": "Bob" } ], "pagination": { "cursor": "eyJiIjpudWxsLCJhIjp7Ik9mZnNldCI6Mn19" }, "total": 3 }

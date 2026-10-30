@@ -1,0 +1,1 @@
+{ "total": 1, "data": [ { "user_id": "12345", "user_name": "Alice", "user_login": "alice", "followed_at": "2026-01-02T03:04:05Z" } ], "pagination": {} }

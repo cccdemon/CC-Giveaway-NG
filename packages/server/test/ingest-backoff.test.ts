@@ -35,6 +35,18 @@ describe('withBackoff', () => {
     expect(sleep.mock.calls.map((c) => c[0])).toEqual([10, 20]);
   });
 
+  it('delayMs overrides the wait for one error', async () => {
+    const sleep = vi.fn<(ms: number) => Promise<void>>(async () => {});
+    let n = 0;
+    await withBackoff(async () => {
+      n++;
+      if (n === 1) throw new Error('warte 7');
+      if (n === 2) throw new Error('normal');
+      return 'ok';
+    }, { sleep, delayMs: (e) => ((e as Error).message === 'warte 7' ? 7 : undefined) });
+    expect(sleep.mock.calls.map((c) => c[0])).toEqual([7, 2000]);
+  });
+
   it('does not retry when retryOn says no', async () => {
     const sleep = vi.fn<(ms: number) => Promise<void>>(async () => {});
     let n = 0;

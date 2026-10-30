@@ -8,6 +8,8 @@ export interface BackoffOptions {
   baseMs?: number;
   sleep?: (ms: number) => Promise<void>;
   retryOn?: (e: unknown) => boolean;
+  /** Eigene Wartezeit für einen Fehler, z. B. Ratelimit-Reset. undefined = Backoff. */
+  delayMs?: (e: unknown, attempt: number) => number | undefined;
 }
 
 const defaultSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -22,7 +24,7 @@ export async function withBackoff<T>(fn: (attempt: number) => Promise<T>, o: Bac
       return await fn(attempt);
     } catch (e) {
       if (attempt + 1 >= attempts || !retryOn(e)) throw e;
-      await sleep(baseMs * 2 ** attempt);
+      await sleep(o.delayMs?.(e, attempt) ?? baseMs * 2 ** attempt);
     }
   }
 }
