@@ -9,6 +9,7 @@ import { accountReducer, accountStream, type AccountState } from '../identity/ac
 import { findIdentity } from '../identity/identities.js';
 import { SESSION_COOKIE } from '../identity/sessions.js';
 import { PLATFORM_TERMS_VERSION } from '../identity/terms.js';
+import { channelStatusView } from '../ingest/status-view.js';
 import { readStream } from '../journal/journal.js';
 import type { ApiDeps } from './auth.js';
 import { serializeCookie } from './cookies.js';
@@ -70,6 +71,9 @@ export function registerMeRoutes(app: FastifyInstance, deps: ApiDeps, pool: pg.P
   );
 
   app.delete('/me/channel', guard, async (req, reply) => run(req, reply, deps.accounts.disconnectChannel, { pid: req.session!.pid }));
+
+  /** Statusblock des eigenen Kanals (NEW_DESIGN.md 11.2). */
+  app.get('/me/channel', guard, async (req) => (await channelStatusView(pool, [req.session!.pid], now()))[0]);
 
   app.get('/me/data', guard, async (req, reply) => {
     const pid = req.session!.pid;

@@ -57,6 +57,23 @@ export async function findPidByTwitchId(db: Queryable, twitchId: string): Promis
   return r.rows[0]?.pid ?? null;
 }
 
+export async function findPidsByTwitchIds(db: Queryable, twitchIds: string[]): Promise<Map<string, string>> {
+  if (twitchIds.length === 0) return new Map();
+  const r = await db.query<{ twitch_id: string; pid: string }>('SELECT twitch_id, pid FROM identities WHERE twitch_id = ANY($1)', [twitchIds]);
+  return new Map(r.rows.map((row) => [row.twitch_id, row.pid]));
+}
+
+export const TOUCH_MIN_MS = 3_600_000;
+
+/** last_seen_at für Anwesende, höchstens einmal je Stunde je Person (Löschfrist, NEW_DESIGN.md 12.4). Liefert die Zahl der Zeilen. */
+export async function touchIdentities(db: Queryable, pids: string[], now: Date): Promise<number> {
+  if (pids.length === 0) return 0;
+  const r = await db.query('UPDATE identities SET last_seen_at = $2 WHERE pid = ANY($1::uuid[]) AND last_seen_at < $3', [
+    pids, now, new Date(now.getTime() - TOUCH_MIN_MS),
+  ]);
+  return r.rowCount ?? 0;
+}
+
 export async function deleteIdentity(c: pg.PoolClient, pid: string): Promise<void> {
   await c.query('DELETE FROM identities WHERE pid = $1', [pid]);
 }

@@ -1,6 +1,9 @@
 import { z } from 'zod';
 
 const ZAHL_MSG = 'Erlaubt ist eine ganze Zahl von 1 bis 65535.';
+const WORKERS_MSG = 'Erlaubt ist eine ganze Zahl ab 1.';
+const INDEX_MSG = 'Erlaubt ist eine ganze Zahl ab 0.';
+const SIM_MSG = 'Erlaubt ist eine ganze Zahl von 1 bis 5000.';
 
 const schema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production'], { message: 'Erlaubt sind: development, test, production.' }).default('development'),
@@ -15,6 +18,12 @@ const schema = z.object({
     .url({ message: 'Keine gültige URL.' })
     .transform((s) => s.replace(/\/+$/, '')),
   TOKEN_KEY_FILE: z.string({ message: 'Pflichtwert fehlt.' }).min(1, { message: 'Pflichtwert fehlt.' }),
+  INGEST_ADAPTER: z.enum(['twitch', 'simulator'], { message: 'Erlaubt sind: twitch, simulator.' }).default('twitch'),
+  INGEST_WORKERS: z.coerce.number({ message: 'Keine Zahl.' }).int({ message: WORKERS_MSG }).min(1, { message: WORKERS_MSG }).default(1),
+  INGEST_WORKER_INDEX: z.coerce.number({ message: 'Keine Zahl.' }).int({ message: INDEX_MSG }).min(0, { message: INDEX_MSG }).default(0),
+  TWITCH_BOT_USER_ID: z.string().default(''),
+  INGEST_SIM_VIEWERS: z.coerce.number({ message: 'Keine Zahl.' }).int({ message: SIM_MSG }).min(1, { message: SIM_MSG }).max(5000, { message: SIM_MSG }).default(20),
+  INGEST_SIM_SEED: z.coerce.number({ message: 'Keine Zahl.' }).int({ message: 'Erlaubt ist eine ganze Zahl.' }).default(1),
 });
 
 export interface Config {
@@ -29,6 +38,14 @@ export interface Config {
   publicUrl: string;
   /** Pfad zur Schlüsseldatei für Kanal-Tokens (64 Hex-Zeichen). */
   tokenKeyFile: string;
+  ingestAdapter: 'twitch' | 'simulator';
+  /** Zahl der Ingest-Worker (Conduit-Shards). Kanäle werden per Hash verteilt (NEW_DESIGN.md 10.2). */
+  ingestWorkers: number;
+  ingestWorkerIndex: number;
+  /** Twitch-ID des Plattform-Bots. Pflicht nur bei INGEST_ADAPTER=twitch, prüft der Ingest beim Start. */
+  twitchBotUserId: string;
+  ingestSimViewers: number;
+  ingestSimSeed: number;
 }
 
 export class ConfigError extends Error {
@@ -44,6 +61,9 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
     throw new ConfigError(parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`));
   }
   const v = parsed.data;
+  if (v.INGEST_WORKER_INDEX >= v.INGEST_WORKERS) {
+    throw new ConfigError(['INGEST_WORKER_INDEX muss kleiner als INGEST_WORKERS sein.']);
+  }
   return {
     nodeEnv: v.NODE_ENV,
     databaseUrl: v.DATABASE_URL,
@@ -54,5 +74,11 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
     twitchClientSecret: v.TWITCH_CLIENT_SECRET,
     publicUrl: v.PUBLIC_URL,
     tokenKeyFile: v.TOKEN_KEY_FILE,
+    ingestAdapter: v.INGEST_ADAPTER,
+    ingestWorkers: v.INGEST_WORKERS,
+    ingestWorkerIndex: v.INGEST_WORKER_INDEX,
+    twitchBotUserId: v.TWITCH_BOT_USER_ID,
+    ingestSimViewers: v.INGEST_SIM_VIEWERS,
+    ingestSimSeed: v.INGEST_SIM_SEED,
   };
 }

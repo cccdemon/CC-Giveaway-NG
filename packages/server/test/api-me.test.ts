@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { ACCOUNT_EVENTS, accountStream } from '../src/identity/account/state.js';
 import { findIdentity } from '../src/identity/identities.js';
 import { loadChannelToken } from '../src/identity/tokens.js';
+import { upsertChannelStatus } from '../src/ingest/channel-status.js';
 import { ALICE, KEY, connect, login, setupApi, type ApiSetup } from './helpers/api.js';
 import { GID, P1, TEAM } from './helpers/giveaway.js';
 import { ctx } from './helpers/fixtures.js';
@@ -95,5 +96,19 @@ describe('/me', () => {
     expect(noBody.json().code).toBe('invalid_legal');
     const denied = (await s.pool.query("SELECT action, reason FROM access_log WHERE kind = 'denied' ORDER BY id")).rows;
     expect(denied).toEqual([{ action: 'accept_terms', reason: 'terms_version_stale' }, { action: 'update_profile', reason: 'invalid_url' }, { action: 'update_profile', reason: 'invalid_legal' }]);
+  });
+
+  it('GET /me/channel returns connected false without a channel and the status view with one', async () => {
+    s = await setupApi();
+    expect((await s.app.inject({ method: 'GET', url: '/me/channel' })).statusCode).toBe(401);
+    const { cookie } = await login(s);
+    let r = await s.app.inject({ method: 'GET', url: '/me/channel', headers: { cookie } });
+    expect(r.statusCode).toBe(200);
+    expect(r.json()).toMatchObject({ connected: false, tokenStatus: 'none', live: false, warning: null });
+    await connect(s, cookie);
+    const pid = r.json().pid as string;
+    await upsertChannelStatus(s.pool, pid, { live: true, viewers: 10, chatters: 8, lastSignalAt: s.clock.now }, s.clock.now);
+    r = await s.app.inject({ method: 'GET', url: '/me/channel', headers: { cookie } });
+    expect(r.json()).toMatchObject({ pid, connected: true, tokenStatus: 'ok', live: true, viewers: 10, chatters: 8, coverage: 0.8, warning: null });
   });
 });

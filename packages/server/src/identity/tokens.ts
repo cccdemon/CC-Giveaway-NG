@@ -40,6 +40,15 @@ export async function loadChannelToken(db: Queryable, pid: string, key: Buffer):
   };
 }
 
+/** Nach einem Refresh durch den Ingest. Nur eine bestehende Zeile, Status wieder ok. Betriebsdaten wie markTokenInvalid. */
+export async function updateChannelToken(db: Queryable, pid: string, t: NewToken, key: Buffer, now: Date): Promise<boolean> {
+  const r = await db.query(
+    `UPDATE channel_tokens SET access_token = $2, refresh_token = $3, scopes = $4, expires_at = $5, status = 'ok', updated_at = $6 WHERE pid = $1`,
+    [pid, encrypt(t.accessToken, key), encrypt(t.refreshToken, key), t.scopes, t.expiresAt, now],
+  );
+  return r.rowCount === 1;
+}
+
 export async function deleteChannelToken(c: pg.PoolClient, pid: string): Promise<void> {
   await c.query('DELETE FROM channel_tokens WHERE pid = $1', [pid]);
 }
