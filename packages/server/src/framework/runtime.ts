@@ -34,6 +34,7 @@ import { noProfile, openGiveawayHandler, type LegalSource, type OpenPre, type Op
 import { fetchHash, type LegalFetcher } from './legal.js';
 import { giveawaysProjector, participantsProjector, timersProjector } from './giveaway/projectors.js';
 import { registerHandler, withdrawHandler, type RegisterCmd } from './giveaway/registration.js';
+import { applySignalsHandler, noIdentities, type ApplySignalsCmd, type IdentityResolver, type ResolvedSignals } from './giveaway/signals.js';
 import { makeGiveawayReducer, type GiveawayState } from './giveaway/state.js';
 import { defaultKernels, type KernelRegistry } from './kernel-registry.js';
 import { ProjectionRegistry } from './projections.js';
@@ -54,6 +55,8 @@ export interface RuntimeOptions {
   legalSource?: LegalSource;
   /** Holt Rechtstext-URLs beim Öffnen und bildet den Hash. Default: fetchHash. */
   fetcher?: LegalFetcher;
+  /** Twitch-ID → pid für apply_signals (NEW_DESIGN.md 9.1). Default: keine Zuordnung. */
+  identities?: IdentityResolver;
 }
 
 type Handler<C, P = undefined, Q = undefined> = CommandHandler<C, GiveawayState, P, Q>;
@@ -81,6 +84,7 @@ export interface Runtime {
     draw: Handler<DrawCmd, GateResult[]>;
     redraw: Handler<RedrawCmd, GateResult[]>;
     setWinnerStatus: Handler<WinnerStatusCmd>;
+    applySignals: Handler<ApplySignalsCmd, ResolvedSignals>;
   };
 }
 
@@ -129,6 +133,7 @@ export function createRuntime(o: RuntimeOptions): Runtime {
       draw: drawHandler(dd),
       redraw: redrawHandler(dd),
       setWinnerStatus: winnerStatusHandler(d),
+      applySignals: applySignalsHandler({ ...d, identities: o.identities ?? noIdentities }),
     },
   };
 }

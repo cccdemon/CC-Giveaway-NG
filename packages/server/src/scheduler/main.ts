@@ -7,6 +7,7 @@ import { denyUsers } from '../framework/giveaway/authorize.js';
 import { RedisPublisher } from '../framework/publisher.js';
 import { accountLegalSource } from '../identity/account/legal-source.js';
 import { loadTokenKey } from '../identity/crypto.js';
+import { identityResolver } from '../identity/resolver.js';
 import { attachAccounts } from '../identity/runtime.js';
 import { createRuntime } from '../framework/runtime.js';
 import { SchedulerLockError, acquireSchedulerLock } from './lock.js';
@@ -46,7 +47,7 @@ async function main() {
     await migratePool.end();
   }
   const redis = new Redis(config.redisUrl);
-  const rt = createRuntime({ pool, publisher: new RedisPublisher(redis), auth: denyUsers, legalSource: accountLegalSource(), log });
+  const rt = createRuntime({ pool, publisher: new RedisPublisher(redis), auth: denyUsers, legalSource: accountLegalSource(), identities: identityResolver(), log });
   const accounts = attachAccounts(rt, { tokenKey });
 
   const maintenance = async () => {
