@@ -116,6 +116,8 @@ export interface EventSubSocketOptions {
 export class EventSubSocket {
   sessionId: string | null = null;
   private current: SocketLike | null = null;
+  /** Ersatzverbindung nach session_reconnect, noch ohne Welcome. */
+  private pending: SocketLike | null = null;
   private readonly retired = new WeakSet<SocketLike>();
   private closedByUs = false;
   private keepaliveTimer: NodeJS.Timeout | undefined;
@@ -147,12 +149,13 @@ export class EventSubSocket {
     this.current = null;
   }
 
-  private open(url: string, replacing: SocketLike | null): void {
+  private open(url: string, replacing: SocketLike | null): SocketLike {
     const s = this.connect(url);
     s.addEventListener('message', (ev) => this.onRaw(s, typeof ev.data === 'string' ? ev.data : String(ev.data ?? ''), replacing));
     s.addEventListener('close', (ev) => void this.onClose(s, ev));
     s.addEventListener('error', () => this.o.log.error({ url }, 'Die EventSub-Verbindung meldet einen Fehler.'));
     if (replacing === null) this.current = s;
+    return s;
   }
 
   private onRaw(s: SocketLike, raw: string, replacing: SocketLike | null): void {
@@ -162,6 +165,7 @@ export class EventSubSocket {
         this.retired.add(replacing);
         replacing.close();
       }
+      if (s === this.pending) this.pending = null;
       this.current = s;
       this.sessionId = m.sessionId;
       this.keepaliveMs = (m.keepaliveSec + KEEPALIVE_GRACE_SEC) * 1000;
@@ -175,7 +179,7 @@ export class EventSubSocket {
     if (s === this.current) this.armKeepalive();
     switch (m.type) {
       case 'session_reconnect':
-        this.open(m.url, s);
+        this.pending = this.open(m.url, s);
         return;
       case 'notification':
       case 'revocation':
@@ -189,10 +193,18 @@ export class EventSubSocket {
   private async onClose(s: SocketLike, ev: { code?: number; reason?: string }): Promise<void> {
     if (this.closedByUs || this.retired.has(s)) return;
     this.retired.add(s);
-    if (s === this.current) {
+    // Nur die aktuelle Verbindung treibt den Reconnect, und nur, wenn kein Ersatz schon unterwegs ist.
+    // Eine alte Verbindung, die Twitch spät schließt, öffnet keine weitere (sonst Reconnect-Sturm).
+    const wasCurrent = s === this.current;
+    const wasPending = s === this.pending;
+    if (wasPending) this.pending = null;
+    if (wasCurrent) {
       this.current = null;
       this.clearKeepalive();
     }
+    if (!wasCurrent && !wasPending) return;
+    if (wasCurrent && this.pending !== null) return;
+    if (wasPending && this.current !== null) return;
     this.attempts += 1;
     const delay = Math.min(RECONNECT_BASE_MS * 2 ** (this.attempts - 1), RECONNECT_MAX_MS);
     this.o.log.error({ code: ev.code, reason: ev.reason, attempt: this.attempts, delay }, 'Die EventSub-Verbindung ist abgerissen. Neuer Versuch folgt.');

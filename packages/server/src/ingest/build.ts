@@ -13,7 +13,7 @@ import { twitchAdapter } from './twitch/adapter.js';
 import { EventSubSocket } from './twitch/eventsub.js';
 import { appTokenSource, helixClient } from './twitch/helix.js';
 import { channelTokenProvider } from './twitch/tokens.js';
-import { createIngestWorker, type IngestWorker } from './worker.js';
+import { createIngestWorker, nonBlocking, type IngestWorker } from './worker.js';
 
 export interface IngestDeps {
   pool: pg.Pool;
@@ -46,13 +46,15 @@ export function buildIngest(config: Config, deps: IngestDeps): { worker: IngestW
     helix, tokens, botUserId: config.twitchBotUserId, workers: config.ingestWorkers, index: config.ingestWorkerIndex, sleep, now, log: deps.log,
     socket: (h) => new EventSubSocket({ ...h, log: deps.log }),
   });
-  // Anwesenheit einmal je Minute: beim ersten Tick einer neuen Minute, robust gegen Takt-Drift.
+  // Anwesenheit einmal je Minute: beim ersten Tick einer neuen Minute, robust gegen Takt-Drift. Läuft im Hintergrund,
+  // damit ein hängender Twitch-Aufruf nie den Takt (Bündel, channel_status) blockiert.
   let lastMinute: string | null = null;
+  const poll = nonBlocking((at) => adapter.pollPresence(at), deps.log, 'pollPresence');
   const onTick = async (at: Date) => {
     const minute = minuteOf(at);
     if (minute === lastMinute) return;
     lastMinute = minute;
-    await adapter.pollPresence(at);
+    await poll(at);
   };
   return { adapter, worker: createIngestWorker({ ...common, adapter, onTick }) };
 }

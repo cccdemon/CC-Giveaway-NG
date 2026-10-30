@@ -1,8 +1,9 @@
 import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ChannelRef } from '../src/ingest/signals.js';
-import { EVENTSUB_URL, EventSubSocket, KEEPALIVE_GRACE_SEC, parseMessage, toSignal, type EventSubMessage, type SocketLike } from '../src/ingest/twitch/eventsub.js';
+import { EVENTSUB_URL, EventSubSocket, KEEPALIVE_GRACE_SEC, parseMessage, toSignal, type EventSubMessage } from '../src/ingest/twitch/eventsub.js';
 import { AT } from './helpers/db.js';
+import { FakeSocket } from './helpers/fake-socket.js';
 
 const P1 = '77777777-7777-4777-8777-777777777777';
 const BOT = '999';
@@ -46,25 +47,6 @@ describe('toSignal', () => {
     expect(toSignal(other, channelOf, BOT, now)).toBeNull();
   });
 });
-
-class FakeSocket implements SocketLike {
-  readonly listeners = new Map<string, ((ev: { data?: unknown; code?: number; reason?: string }) => void)[]>();
-  readonly sent: string[] = [];
-  closed = false;
-  constructor(readonly url: string) {}
-  send(data: string) {
-    this.sent.push(data);
-  }
-  close() {
-    this.closed = true;
-  }
-  addEventListener(type: string, fn: (ev: { data?: unknown; code?: number; reason?: string }) => void) {
-    this.listeners.set(type, [...(this.listeners.get(type) ?? []), fn]);
-  }
-  emit(type: string, ev: { data?: unknown; code?: number; reason?: string } = {}) {
-    for (const fn of this.listeners.get(type) ?? []) fn(ev);
-  }
-}
 
 function harness() {
   const sockets: FakeSocket[] = [];
@@ -152,6 +134,26 @@ describe('EventSubSocket', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(h.sockets).toHaveLength(2);
     expect(h.sleep).not.toHaveBeenCalled();
+  });
+
+  it('a close of the old socket before the new welcome does not open a third socket', async () => {
+    const h = harness();
+    const started = h.socket.start();
+    h.welcome(h.sockets[0]!);
+    await started;
+    h.sockets[0]!.emit('message', { data: raw('eventsub-reconnect') });
+    expect(h.sockets).toHaveLength(2);
+    h.sockets[0]!.emit('close', { code: 4004 });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(h.sockets).toHaveLength(2);
+    expect(h.sleep).not.toHaveBeenCalled();
+    h.welcome(h.sockets[1]!, 'sess-2');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(h.sessions).toEqual(['sess-1', 'sess-2']);
+    // Eine späte Schließung einer alten, nicht mehr aktuellen Verbindung löst nichts aus.
+    h.sockets[0]!.emit('close', { code: 1006 });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(h.sockets).toHaveLength(2);
   });
 
   it('an unexpected close reconnects with backoff', async () => {

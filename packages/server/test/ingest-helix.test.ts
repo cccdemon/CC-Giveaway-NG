@@ -161,6 +161,29 @@ describe('helixClient', () => {
     });
   });
 
+  it('bindShard throws when Twitch answers 202 with an errors list', async () => {
+    const { helix } = client(() => json(202, { data: [], errors: [{ id: '1', message: 'websocket session not found', code: 'websocket_session_not_found' }] }));
+    await expect(helix.bindShard('cid-1', 1, 'sess-tot')).rejects.toMatchObject({ code: 'helix_error', message: expect.stringContaining('websocket session not found') });
+  });
+
+  it('every call carries an abort signal and an aborted fetch counts as unreachable', async () => {
+    const { helix, calls, sleep } = client(() => new DOMException('The operation was aborted.', 'AbortError'));
+    await expect(helix.getStreams(['1'])).rejects.toMatchObject({ code: 'helix_unreachable' });
+    expect(calls).toHaveLength(3);
+    expect(sleep).toHaveBeenCalledTimes(2);
+    const seen: boolean[] = [];
+    const s = stub(() => json(200, { data: [] }));
+    const spying: typeof fetch = async (input, init) => {
+      seen.push(init?.signal instanceof AbortSignal);
+      return s.fetch(input, init);
+    };
+    const h2 = helixClient({ clientId: 'cid', appToken: fixedApp(), fetch: spying, sleep: async () => {} });
+    await h2.getStreams(['1']);
+    const src = appTokenSource({ clientId: 'cid', clientSecret: 'sec', fetch: async (input, init) => { seen.push(init?.signal instanceof AbortSignal); return json(200, { access_token: 'a', expires_in: 3600 }); } });
+    await src.get();
+    expect(seen).toEqual([true, true]);
+  });
+
   it('subscribe treats 202 as created and 409 as exists', async () => {
     const { helix, calls } = client((_c, n) => (n === 1 ? json(202, fixture('subscriptions')) : json(409, { error: 'Conflict', status: 409, message: 'subscription already exists' })));
     expect(await helix.subscribe('channel.chat.message', '1', { broadcaster_user_id: '1001', user_id: '999' }, 'cid-1')).toBe('created');

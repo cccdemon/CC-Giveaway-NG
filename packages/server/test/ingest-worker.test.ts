@@ -7,7 +7,7 @@ import type { ChannelSource } from '../src/ingest/directory.js';
 import { pgGiveawayLookup } from '../src/ingest/dispatch.js';
 import type { AdapterHealth, IngestAdapter, Signal, SignalUser } from '../src/ingest/signals.js';
 import { SimulatorAdapter } from '../src/ingest/simulator.js';
-import { createIngestWorker } from '../src/ingest/worker.js';
+import { SIGNAL_NOTE_MIN_MS, createIngestWorker, nonBlocking } from '../src/ingest/worker.js';
 import { AT } from './helpers/db.js';
 import { GID, GID2, GID3, P1, P2, P3, createOpen, must, setupGiveaway } from './helpers/giveaway.js';
 
@@ -110,6 +110,48 @@ describe('Ingest-Worker', () => {
     a.healthRows = [{ channel: P1, ok: true, lastSignalAt: AT.toISOString(), problem: null }];
     await s.worker.tick(at(1));
     expect((await readChannelStatus(s.pool, [P1])).get(P1)!.problem).toBeNull();
+  });
+
+  it('unchanged health does not rewrite channel_status, chat signals are noted at most every 5 s', async () => {
+    const a = controllable();
+    const s = await setup(a);
+    a.healthRows = [{ channel: P1, ok: true, lastSignalAt: AT.toISOString(), problem: null }];
+    a.emit({ kind: 'chat', channel: P1, at: AT.toISOString(), user: ALICE, text: 'a', messageId: 'm1' });
+    await s.worker.tick(AT);
+    const first = (await readChannelStatus(s.pool, [P1])).get(P1)!;
+    expect(first).toMatchObject({ lastSignalAt: AT, updatedAt: AT });
+    s.clock.now = at(2);
+    a.emit({ kind: 'chat', channel: P1, at: at(2).toISOString(), user: ALICE, text: 'b', messageId: 'm2' });
+    await s.worker.tick(at(2));
+    await s.worker.tick(at(3));
+    expect((await readChannelStatus(s.pool, [P1])).get(P1)).toMatchObject({ lastSignalAt: AT, updatedAt: AT });
+    s.clock.now = at(SIGNAL_NOTE_MIN_MS / 1000);
+    a.emit({ kind: 'chat', channel: P1, at: s.clock.now.toISOString(), user: ALICE, text: 'c', messageId: 'm3' });
+    await s.worker.tick(s.clock.now);
+    expect((await readChannelStatus(s.pool, [P1])).get(P1)).toMatchObject({ lastSignalAt: s.clock.now, updatedAt: s.clock.now });
+    a.healthRows = [{ channel: P1, ok: false, lastSignalAt: null, problem: 'twitch_error' }];
+    s.clock.now = at(10);
+    await s.worker.tick(at(10));
+    expect((await readChannelStatus(s.pool, [P1])).get(P1)).toMatchObject({ problem: 'twitch_error', updatedAt: at(10) });
+  });
+
+  it('nonBlocking runs the task once at a time and logs a rejection', async () => {
+    const log = { error: vi.fn() };
+    let release: () => void = () => {};
+    let calls = 0;
+    const fn = vi.fn(() => { calls++; return new Promise<void>((r) => { release = r; }); });
+    const run = nonBlocking(fn, log, 'Test');
+    await run(AT);
+    await run(AT);
+    expect(calls).toBe(1);
+    release();
+    await new Promise((r) => setTimeout(r, 0));
+    await run(AT);
+    expect(calls).toBe(2);
+    release();
+    const failing = nonBlocking(async () => { throw new Error('kaputt'); }, log, 'Test');
+    await failing(AT);
+    await vi.waitFor(() => expect(log.error).toHaveBeenCalledOnce());
   });
 
   it('onTick runs before the bundles flush', async () => {

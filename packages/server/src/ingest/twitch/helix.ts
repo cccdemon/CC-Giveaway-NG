@@ -24,6 +24,8 @@ export interface AppTokenSource {
 }
 
 const APP_TOKEN_MARGIN_MS = 60_000;
+/** Kein Aufruf darf den Takt des Workers minutenlang blockieren. */
+export const HELIX_TIMEOUT_MS = 10_000;
 
 /** App-Access-Token über Client Credentials, gecacht bis kurz vor Ablauf. */
 export function appTokenSource(o: { clientId: string; clientSecret: string; fetch?: typeof fetch; idBase?: string; now?: () => Date }): AppTokenSource {
@@ -35,7 +37,9 @@ export function appTokenSource(o: { clientId: string; clientSecret: string; fetc
     const body = new URLSearchParams({ client_id: o.clientId, client_secret: o.clientSecret, grant_type: 'client_credentials' });
     let res: Response;
     try {
-      res = await doFetch(`${o.idBase ?? ID_BASE}/oauth2/token`, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: body.toString() });
+      res = await doFetch(`${o.idBase ?? ID_BASE}/oauth2/token`, {
+        method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: body.toString(), signal: AbortSignal.timeout(HELIX_TIMEOUT_MS),
+      });
     } catch {
       throw new HelixError('helix_unreachable', null, null);
     }
@@ -117,7 +121,7 @@ export function helixClient(o: HelixOptions): HelixClient {
     if (r.body !== undefined) headers['content-type'] = 'application/json';
     let res: Response;
     try {
-      res = await doFetch(url, { method: r.method, headers, ...(r.body === undefined ? {} : { body: JSON.stringify(r.body) }) });
+      res = await doFetch(url, { method: r.method, headers, signal: AbortSignal.timeout(HELIX_TIMEOUT_MS), ...(r.body === undefined ? {} : { body: JSON.stringify(r.body) }) });
     } catch {
       throw new HelixError('helix_unreachable', null, null);
     }
@@ -226,10 +230,18 @@ export function helixClient(o: HelixOptions): HelixClient {
     },
 
     async bindShard(conduitId, shardId, sessionId) {
-      await call({
+      const r = await call({
         method: 'PATCH', path: '/eventsub/conduits/shards',
         body: { conduit_id: conduitId, shards: [{ id: String(shardId), transport: { method: 'websocket', session_id: sessionId } }] },
       });
+      // Twitch antwortet 202 auch bei Fehlern je Shard und listet sie unter errors.
+      const errors = (r.body as { errors?: unknown } | null)?.errors;
+      if (Array.isArray(errors) && errors.length > 0) {
+        const text = errors.map((e) => String((e as { message?: unknown })?.message ?? JSON.stringify(e))).join('; ');
+        const err = new HelixError('helix_error', r.status, null);
+        err.message = `Twitch Helix: Shard ${shardId} ließ sich nicht binden: ${text}`;
+        throw err;
+      }
     },
 
     async subscribe(type, version, condition, conduitId) {

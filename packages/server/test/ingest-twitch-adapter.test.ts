@@ -3,7 +3,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { minuteOf } from '../src/ingest/bundler.js';
 import type { ChannelRef, Signal } from '../src/ingest/signals.js';
 import { twitchAdapter } from '../src/ingest/twitch/adapter.js';
-import { parseMessage, type EventSubMessage } from '../src/ingest/twitch/eventsub.js';
+import { EventSubSocket, parseMessage, type EventSubMessage } from '../src/ingest/twitch/eventsub.js';
+import { FakeSocket } from './helpers/fake-socket.js';
 import { HelixError, type Conduit, type HelixClient, type StreamInfo } from '../src/ingest/twitch/helix.js';
 import type { ChannelTokenProvider } from '../src/ingest/twitch/tokens.js';
 import { AT } from './helpers/db.js';
@@ -63,24 +64,76 @@ describe('twitchAdapter', () => {
   it('start binds the shard after the session and subscribes only owned channels', async () => {
     const s = setup();
     await s.adapter.start([FULL, STATE, FOREIGN]);
+    await s.adapter.settled();
     expect(s.socket.start).toHaveBeenCalledOnce();
     expect(s.helix.listConduits).toHaveBeenCalledOnce();
     expect(s.helix.bindShard).toHaveBeenCalledWith('cid', 0, 'sess-1');
-    expect(s.helix.subscribe.mock.calls.map((c) => [c[0], c[2].broadcaster_user_id])).toEqual([
-      ['stream.online', '1001'], ['stream.offline', '1001'], ['channel.chat.message', '1001'], ['channel.follow', '1001'],
-      ['stream.online', '1002'], ['stream.offline', '1002'],
-    ]);
+    const subs = () => s.helix.subscribe.mock.calls.map((c) => `${c[0]}:${c[2].broadcaster_user_id}`).sort();
+    expect(subs()).toEqual([
+      'stream.online:1001', 'stream.offline:1001', 'channel.chat.message:1001', 'channel.follow:1001', 'stream.online:1002', 'stream.offline:1002',
+    ].sort());
     s.helix.subscribe.mockClear();
     await s.adapter.start([FULL, { ...STATE, watch: 'full' }]);
+    await s.adapter.settled();
     expect(s.socket.start).toHaveBeenCalledOnce();
-    expect(s.helix.subscribe.mock.calls.map((c) => [c[0], c[2].broadcaster_user_id])).toEqual([
-      ['stream.online', '1002'], ['stream.offline', '1002'], ['channel.chat.message', '1002'], ['channel.follow', '1002'],
-    ]);
+    expect(subs()).toEqual(['stream.online:1002', 'stream.offline:1002', 'channel.chat.message:1002', 'channel.follow:1002'].sort());
     await s.handlers.onSession!('sess-2');
     expect(s.helix.bindShard).toHaveBeenLastCalledWith('cid', 0, 'sess-2');
     expect(s.helix.listConduits).toHaveBeenCalledOnce();
     await s.adapter.close();
     expect(s.socket.close).toHaveBeenCalledOnce();
+  });
+
+  it('with the real EventSubSocket the conduit exists before the socket, the shard is bound after the welcome and subscriptions follow', async () => {
+    const helix = fakeHelix();
+    const sockets: FakeSocket[] = [];
+    const log = { error: vi.fn() };
+    const adapter = twitchAdapter({
+      helix, tokens: fakeTokens(), botUserId: BOT, workers: 1, index: 0, sleep: async () => {}, now: () => AT, log,
+      socket: (h) => new EventSubSocket({ ...h, log, sleep: async () => {}, connect: (url) => { const f = new FakeSocket(url); sockets.push(f); return f; } }),
+    });
+    const starting = adapter.start([FULL]);
+    await vi.waitFor(() => expect(sockets).toHaveLength(1));
+    expect(helix.listConduits).toHaveBeenCalledOnce();
+    expect(helix.bindShard).not.toHaveBeenCalled();
+    sockets[0]!.emit('message', { data: raw('eventsub-welcome') });
+    await starting;
+    await adapter.settled();
+    expect(helix.bindShard).toHaveBeenCalledWith('cid', 0, 'AQoQILE98gtqShGmLD7AM6yJThAB');
+    expect(helix.subscribe.mock.calls.map((c) => c[0])).toEqual(['stream.online', 'stream.offline', 'channel.chat.message', 'channel.follow']);
+    expect(helix.listConduits).toHaveBeenCalledOnce();
+    expect(log.error).not.toHaveBeenCalled();
+    await adapter.close();
+  });
+
+  it('subscriptions run in parallel groups and never block start', async () => {
+    const s = setup();
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => { release = r; });
+    s.helix.subscribe.mockImplementation(async () => { await gate; return 'created'; });
+    const many = Array.from({ length: 25 }, (_, i) => ref(`${i.toString(16).padStart(8, '0')}-7777-4777-8777-777777777777`, `t${i}`));
+    await s.adapter.start(many);
+    expect(s.helix.subscribe.mock.calls.length).toBeGreaterThanOrEqual(20);
+    expect(s.helix.subscribe.mock.calls.length).toBeLessThan(100);
+    release();
+    await s.adapter.settled();
+    expect(s.helix.subscribe).toHaveBeenCalledTimes(100);
+    expect(s.adapter.health().every((h) => h.ok)).toBe(true);
+  });
+
+  it('a rejected token lookup marks only that channel and the other channels are still polled', async () => {
+    const tokens = fakeTokens();
+    tokens.accessTokenFor.mockImplementation(async (pid) => { if (pid === P1) throw new Error('Pool erschöpft'); return 'user-token'; });
+    const helix = fakeHelix();
+    helix.getStreams.mockResolvedValue([{ userId: '1001', live: true, viewers: 1, startedAt: '' }, { userId: '1002', live: true, viewers: 1, startedAt: '' }]);
+    const s = setup({ helix, tokens });
+    await s.adapter.start([FULL, ref(P2, '1002')]);
+    await s.adapter.pollPresence(AT);
+    expect(s.helix.getChatters).toHaveBeenCalledTimes(1);
+    expect(s.helix.getChatters).toHaveBeenCalledWith('1002', 'user-token');
+    expect(s.adapter.health().find((h) => h.channel === P1)).toMatchObject({ ok: false, problem: 'twitch_error' });
+    expect(s.adapter.health().find((h) => h.channel === P2)).toMatchObject({ ok: true });
+    expect(s.log.error).toHaveBeenCalled();
   });
 
   it('pollPresence emits stream_state from getStreams and presence from getChatters for live full channels', async () => {

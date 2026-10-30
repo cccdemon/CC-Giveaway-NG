@@ -35,6 +35,8 @@ interface Channel {
 
 export interface TwitchAdapter extends IngestAdapter {
   pollPresence(now: Date): Promise<void>;
+  /** Wartet auf laufende Hintergrund-Abonnements. Für Tests und das Herunterfahren. */
+  settled(): Promise<void>;
 }
 
 export function twitchAdapter(o: TwitchAdapterOptions): TwitchAdapter {
@@ -43,6 +45,7 @@ export function twitchAdapter(o: TwitchAdapterOptions): TwitchAdapter {
   let handler: (s: Signal) => void = () => {};
   let socket: Pick<EventSubSocket, 'start' | 'close'> | null = null;
   let conduitId: string | null = null;
+  let subscribing: Promise<void> | null = null;
 
   const emit = (ch: Channel, s: Signal): void => {
     ch.lastSignalAt = o.now().toISOString();
@@ -50,8 +53,9 @@ export function twitchAdapter(o: TwitchAdapterOptions): TwitchAdapter {
     handler(s);
   };
 
+  /** Nach jeder Sitzung (auch Reconnect) nur den Shard binden. Twitch gibt dafür etwa 10 s. */
   const onSession = async (sessionId: string): Promise<void> => {
-    conduitId ??= await ensureConduit(o.helix, { workers: o.workers, index: o.index, sleep: o.sleep });
+    if (conduitId === null) throw new Error('Kein Conduit. start() legt es vor der Verbindung an.');
     await o.helix.bindShard(conduitId, o.index, sessionId);
   };
 
@@ -70,35 +74,48 @@ export function twitchAdapter(o: TwitchAdapterOptions): TwitchAdapter {
     }
   };
 
-  async function subscribeOwned(): Promise<void> {
+  async function subscribeOne(ch: Channel): Promise<void> {
     if (conduitId === null) return;
-    for (const ch of byPid.values()) {
-      if (!ch.ref.owned || ch.subscribed === ch.ref.watch) continue;
-      try {
-        await subscribeChannel(o.helix, conduitId, ch.ref, o.botUserId);
-        ch.subscribed = ch.ref.watch;
-      } catch (err) {
-        ch.problem = 'twitch_error';
-        o.log.error({ err, channel: ch.ref.pid }, 'Die EventSub-Abonnements eines Kanals ließen sich nicht anlegen. Nächster Versuch beim nächsten Verzeichnislauf.');
-      }
+    const watch = ch.ref.watch;
+    try {
+      await subscribeChannel(o.helix, conduitId, ch.ref, o.botUserId);
+      ch.subscribed = watch;
+    } catch (err) {
+      ch.problem = 'twitch_error';
+      o.log.error({ err, channel: ch.ref.pid }, 'Die EventSub-Abonnements eines Kanals ließen sich nicht anlegen. Nächster Versuch beim nächsten Verzeichnislauf.');
     }
+  }
+
+  /** Abonniert in Gruppen, läuft im Hintergrund. Ein zweiter Aufruf hängt sich hinter den laufenden. */
+  function subscribeOwned(): void {
+    const run = async () => {
+      const due = owned().filter((ch) => ch.subscribed !== ch.ref.watch);
+      for (let i = 0; i < due.length; i += PARALLEL_CHANNELS) {
+        await Promise.all(due.slice(i, i + PARALLEL_CHANNELS).map(subscribeOne));
+      }
+    };
+    const previous = subscribing ?? Promise.resolve();
+    const next: Promise<void> = previous.then(run).finally(() => {
+      if (subscribing === next) subscribing = null;
+    });
+    subscribing = next;
   }
 
   const owned = (): Channel[] => [...byPid.values()].filter((ch) => ch.ref.owned);
 
   async function pollChatters(ch: Channel, minute: string): Promise<void> {
-    const token = await o.tokens.accessTokenFor(ch.ref.pid);
-    if (token === null) {
-      ch.problem = 'token_invalid';
-      return;
-    }
     try {
+      const token = await o.tokens.accessTokenFor(ch.ref.pid);
+      if (token === null) {
+        ch.problem = 'token_invalid';
+        return;
+      }
       const users = await o.helix.getChatters(ch.ref.twitchId, token);
       ch.problem = null;
       emit(ch, { kind: 'presence', channel: ch.ref.pid, minute, users });
     } catch (err) {
       if (err instanceof HelixError && err.code === 'helix_unauthorized') {
-        await o.tokens.invalidate(ch.ref.pid);
+        await o.tokens.invalidate(ch.ref.pid).catch(() => undefined);
         ch.problem = 'token_invalid';
       } else {
         ch.problem = 'twitch_error';
@@ -118,10 +135,12 @@ export function twitchAdapter(o: TwitchAdapterOptions): TwitchAdapter {
         byTwitchId.set(ref.twitchId, ch);
       }
       if (socket === null) {
+        // Reihenfolge zählt: Conduit vor der Verbindung, damit onSession den Shard sofort binden kann.
+        conduitId ??= await ensureConduit(o.helix, { workers: o.workers, index: o.index, sleep: o.sleep });
         socket = o.socket({ onSession, onMessage });
         await socket.start();
       }
-      await subscribeOwned();
+      subscribeOwned();
     },
 
     async stop(channel) {
@@ -133,6 +152,10 @@ export function twitchAdapter(o: TwitchAdapterOptions): TwitchAdapter {
 
     onSignal(h) {
       handler = h;
+    },
+
+    async settled() {
+      while (subscribing !== null) await subscribing;
     },
 
     async pollPresence(now) {
@@ -155,7 +178,7 @@ export function twitchAdapter(o: TwitchAdapterOptions): TwitchAdapter {
       }
       const due = list.filter((ch) => ch.ref.watch === 'full' && ch.live);
       for (let i = 0; i < due.length; i += PARALLEL_CHANNELS) {
-        await Promise.all(due.slice(i, i + PARALLEL_CHANNELS).map((ch) => pollChatters(ch, minute)));
+        await Promise.allSettled(due.slice(i, i + PARALLEL_CHANNELS).map((ch) => pollChatters(ch, minute)));
       }
     },
 
