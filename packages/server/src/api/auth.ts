@@ -25,7 +25,12 @@ export const OAUTH_COOKIE = 'ccg_oauth';
 const OAUTH_TTL_SEC = 10 * 60;
 const SESSION_TTL_SEC = SESSION_TTL_DAYS * 86_400;
 
-type Flow = 'login' | 'connect';
+/** Scopes des Plattform-Bots (NEW_DESIGN.md 10.2). Der Betreiber erteilt sie einmal über GET /auth/twitch/bot. */
+export const BOT_SCOPES = ['user:bot', 'user:read:chat', 'user:write:chat'] as const;
+
+type Flow = 'login' | 'connect' | 'bot';
+
+const SCOPES_OF: Record<Flow, readonly string[]> = { login: [], connect: REQUIRED_CHANNEL_SCOPES, bot: BOT_SCOPES };
 
 const OAUTH_STATE = { code: 'oauth_state', message: 'Die Anmeldung ist abgelaufen. Starte sie neu.' };
 
@@ -42,7 +47,7 @@ function encodeOauth(state: string, flow: Flow, ret: string): string {
 function decodeOauth(value: string | undefined): { state: string; flow: Flow; ret: string } | null {
   if (!value) return null;
   const [state, flow, retB64] = value.split('.');
-  if (!state || (flow !== 'login' && flow !== 'connect') || retB64 === undefined) return null;
+  if (!state || (flow !== 'login' && flow !== 'connect' && flow !== 'bot') || retB64 === undefined) return null;
   return { state, flow, ret: safeReturnPath(Buffer.from(retB64, 'base64url').toString('utf8')) };
 }
 
@@ -57,10 +62,12 @@ export function registerAuthRoutes(app: FastifyInstance, deps: ApiDeps, pool: pg
 
   const start = (reply: FastifyReply, flow: Flow, ret: string) => {
     const state = randomBytes(24).toString('base64url');
-    const scopes = flow === 'connect' ? REQUIRED_CHANNEL_SCOPES : [];
     reply.header('set-cookie', cookie(OAUTH_COOKIE, encodeOauth(state, flow, ret), OAUTH_TTL_SEC));
-    return reply.redirect(deps.twitch.authorizeUrl({ redirectUri, scopes, state }), 302);
+    return reply.redirect(deps.twitch.authorizeUrl({ redirectUri, scopes: SCOPES_OF[flow], state }), 302);
   };
+
+  /** Der Betreiber meldet sich mit dem Bot-Konto an und erteilt der App die Bot-Rechte. Danach reichen App-Tokens. */
+  app.get('/auth/twitch/bot', async (_req, reply) => start(reply, 'bot', '/'));
 
   app.get('/auth/twitch/login', async (req: FastifyRequest<{ Querystring: { return?: string } }>, reply) =>
     start(reply, 'login', safeReturnPath(req.query.return)),
@@ -97,7 +104,7 @@ export function registerAuthRoutes(app: FastifyInstance, deps: ApiDeps, pool: pg
     try {
       const token = await deps.twitch.exchangeCode(req.query.code, redirectUri);
       const user = await deps.twitch.getUser(token.accessToken);
-      if (oauth.flow === 'login') {
+      if (oauth.flow === 'login' || oauth.flow === 'bot') {
         const { pid, r } = await signIn(req, user, at);
         if (!r.ok) return sendError(reply, rejectionToHttp(r.rejection));
         const sid = await createSession(pool, pid, at);

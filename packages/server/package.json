@@ -8,8 +8,10 @@
     "lint": "eslint .",
     "test": "vitest run",
     "dev:app": "tsx watch src/app/main.ts",
+    "dev:ingest": "tsx watch src/ingest/main.ts",
     "start:app": "node dist/app/main.js",
-    "start:scheduler": "node dist/scheduler/main.js"
+    "start:scheduler": "node dist/scheduler/main.js",
+    "start:ingest": "node dist/ingest/main.js"
   },
   "dependencies": {
     "fastify": "^5.12.7",

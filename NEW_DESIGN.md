@@ -132,7 +132,7 @@ Es gibt keinen zweiten Weg. Auch Test- und Simulator-Signale laufen durch diesen
 | `kernels/*` | je ein Kern | nur `kernel-api` |
 | `journal` | Ereignisse schreiben/lesen, Upcaster, Ströme | PG |
 | `framework` | Befehle, Lebenszyklus, Bedingungen, Ziehung, Dienste | `kernel-api`, `journal`, Registry |
-| `ingest` | Adapter, Bündelung | sendet nur Befehle |
+| `ingest` | Adapter, Bündelung, Kanalverzeichnis, `channel_status` | sendet nur Befehle, liest Lesetabellen, `identity` für Tokens |
 | `identity` | Konten, `identities`, Löschung | PG |
 | `api` | HTTP/WS, Rechteprüfung | `framework`, `identity` |
 | `web` | SvelteKit-Oberflächen | nur `api` |

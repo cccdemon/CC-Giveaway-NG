@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## PFLICHTLEKTÜRE
 **[NEW_DESIGN.md](NEW_DESIGN.md) vor jeder Arbeit VOLLSTÄNDIG lesen – jede Zeile, kein Überfliegen,
 kein Teil-Lesen per offset/limit oder grep.** Bei Widerspruch gilt NEW_DESIGN.md.
-Umsetzungspläne je Teilprojekt liegen in `docs/superpowers/plans/`. Teilprojekte 1–3 sind fertig, als Nächstes kommt 4 (Ingest).
+Umsetzungspläne je Teilprojekt liegen in `docs/superpowers/plans/`. Teilprojekte 1–4 sind fertig, als Nächstes kommt 5 (Rahmen-Dienste + Kern A).
 
 ## Harte Regeln
 - Jede Zustandsänderung läuft durch `CommandBus.execute`. Kein zweiter Schreibweg im Produktcode, auch nicht für den Simulator. Auch `identities`, `channel_tokens` und Löschungen werden nur in `prepare` oder in Projektoren innerhalb der Befehls-Transaktion geschrieben. Nur Schichttests der Journal-/Projektionsmodule (`test/journal.test.ts`, `test/projections.test.ts`) dürfen `appendLocked` direkt rufen.
@@ -29,7 +29,9 @@ Von der Wurzel:
 Tests: `vitest` mit `test/global-setup.ts`, das einen PostgreSQL-Container für den ganzen Lauf startet. Jeder Test ruft `freshDb()` (`test/helpers/db.ts`) und bekommt eine eigene Datenbank mit Migrationen und Partitionen. Kein Redis in Tests (`InMemoryPublisher`). `test/helpers/api.ts` liefert `setupApi()`, `login()`, `connect()` mit Twitch-Stub. Feste Testzeit `AT = 2026-10-15T12:00Z`.
 
 ## Architektur
-Modularer Monolith, zwei Prozesse aus derselben Codebasis (`src/app/main.ts`, `src/scheduler/main.ts`), Ingest-Worker folgt in Teilprojekt 4. PostgreSQL-Journal ist die einzige Wahrheit, Redis nur Pub/Sub.
+Modularer Monolith, drei Prozesse aus derselben Codebasis (`src/app/main.ts`, `src/scheduler/main.ts`, `src/ingest/main.ts`). PostgreSQL-Journal ist die einzige Wahrheit, Redis nur Pub/Sub.
+
+**Ingest** (`src/ingest`): Adapter (`simulator`, `twitch/`) liefern Signale, der Bündler sammelt je Kanal und Minute, der Dispatcher sendet je offenem Giveaway `apply_signals` mit Akteur `system:ingest`. Der Ingest schreibt nie ins Journal (ESLint-Regel), nur in die Betriebsdaten-Tabelle `channel_status`. Kanalverzeichnis aus Lesetabellen alle 30 s, `owned` per Hash auf Worker verteilt. `apply_signals` (`framework/giveaway/signals.ts`) erzeugt bis Teilprojekt 5 keine Ereignisse, löst aber Twitch-IDs über `IdentityResolver` zu pids auf.
 
 **Befehlsablauf** (`framework/command-bus.ts`). Ein `CommandHandler` hat `type`, `streamOf`, `reducer`, optional `pre`, `authorize`, optional `prepare`, `decide`. `execute` macht:
 1. `pre` vor der Transaktion, ohne Sperre, für Netz-I/O (Twitch, Rechtstext-URLs).

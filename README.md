@@ -59,18 +59,41 @@ fachlichen Begriffe (Giveaway, Kern, Topf, Chance …) stehen in
 | **Kanal-Token** | Die Twitch-Tokens eines Streamers in `channel_tokens`, AES-256-GCM-verschlüsselt. Der Schlüssel liegt in der Datei aus `TOKEN_KEY_FILE`, nie in der Datenbank. |
 | **Solo-Team** | Das Team, das jeder Streamer beim ersten Anmelden automatisch bekommt (`soloTeamId` im Konto). Giveaways gehören einem Team. |
 | **Rechtstexte** | Impressum, Teilnahmebedingungen und Datenschutzhinweis. Je Giveaway oder im Profil. Beim Öffnen friert der Rahmen sie ein: Text als Kopie, URL mit SHA-256 des Inhalts (`giveaway_legal_frozen`). Ohne sie öffnet kein Giveaway. |
-| **Teilprojekt** | Ein Abschnitt des Neubaus mit eigenem Umsetzungsplan (NEW_DESIGN.md, Abschnitt 14). Teilprojekte 1 bis 3 (Fundament, Kern-Vertrag + Kern B, Konten + Identität) sind fertig. |
+| **Signal** | Was der Ingest von Twitch holt: Anwesenheit (wer ist im Chat, je Minute), Chat-Nachricht, Follow, Live-Status mit Zuschauerzahl. Signale tragen Twitch-Nutzer. Erst der Rahmen macht daraus `pid`s. |
+| **Bündel** | Alle Signale eines Kanals in einer Minute. Fließt 5 s nach Minutenende ab und wird je offenem Giveaway des Kanals ein Befehl `apply_signals` mit Akteur `system:ingest`. |
+| **Adapter** | Die Quelle der Signale: `twitch` (echte Twitch-API) oder `simulator` (erzeugt Signale im Prozess, deterministisch je Seed). Beide erfüllen dieselbe Schnittstelle. |
+| **Conduit / Shard** | Twitch liefert EventSub-Benachrichtigungen (Chat, Follow, Live-Status) über ein Conduit je Plattform. Jeder Ingest-Worker hält einen Shard davon über eine WebSocket-Verbindung. Kanäle werden per Hash auf Worker verteilt, nur der zuständige Worker pollt die Anwesenheit. |
+| **Plattform-Bot** | Ein Twitch-Konto des Betreibers, über das die Plattform Chat liest und Ansagen sendet. Es erteilt der App einmal die Rechte `user:bot`, `user:read:chat`, `user:write:chat`. Danach reichen App-Tokens. `TWITCH_BOT_USER_ID` ist seine Twitch-ID. |
+| **Signalqualität** | Die Tabelle `channel_status`: live/offline, Zuschauerzahl, Chatters, letztes Signal, Problem. Betriebsdaten des Ingest, kein Nachweis, nicht im Journal. Der Statusblock warnt: rot (Token ungültig), gelb (live ohne Signal über 2 Minuten, Twitch antwortet nicht), Hinweis (Abdeckung unter 50 %). |
+| **Teilprojekt** | Ein Abschnitt des Neubaus mit eigenem Umsetzungsplan (NEW_DESIGN.md, Abschnitt 14). Teilprojekte 1 bis 4 (Fundament, Kern-Vertrag + Kern B, Konten + Identität, Ingest) sind fertig. |
 
 ## Prozesse
 
-Zwei Prozesse aus `packages/server`:
+Drei Prozesse aus `packages/server`:
 
 - **app** (`npm run start:app`): HTTP-Server. Beim Start Migrationen, Partitionen und Kern-Versionsabgleich der Lesetabellen.
   - `GET /healthz`
   - `GET /auth/twitch/login?return=/pfad` → Twitch → `GET /auth/twitch/callback` setzt das Sitzungs-Cookie. `GET /auth/twitch/connect` verbindet den Kanal mit den Scopes `moderator:read:followers`, `moderator:read:chatters`, `channel:bot`. `POST /auth/logout`.
-  - `GET /me`, `POST /me/terms {version}`, `PUT /me/profile {legal}`, `DELETE /me/channel`, `GET /me/data` (JSON-Export, Eintrag im Zugriffslog), `DELETE /me` (Löschung).
+  - `GET /me`, `POST /me/terms {version}`, `PUT /me/profile {legal}`, `DELETE /me/channel`, `GET /me/channel` (Statusblock des eigenen Kanals), `GET /me/data` (JSON-Export, Eintrag im Zugriffslog), `DELETE /me` (Löschung).
+  - `GET /auth/twitch/bot`: Anmeldung mit dem Bot-Konto, erteilt der App die Bot-Rechte (siehe „Bot einrichten“).
   - Ablehnungen antworten mit `{code, message}`: 401 ohne Sitzung, 403 fremde Person oder fremdes Team, 404 unbekannt, sonst 400.
 - **scheduler** (`npm run start:scheduler`): holt sich zuerst den Einzelinstanz-Lock. Ein zweiter Scheduler bricht mit Hinweis ab.
   - Wartung stündlich: Partitionen anlegen, alte IP-Adressen entfernen, abgelaufene Sitzungen löschen, Konten ohne Anmeldung seit 365 Tagen löschen (Befehl mit Akteur `system:scheduler`).
   - Zeitgeber alle 5 s: fällige Einträge aus `timers` laufen als Kern-Befehl mit Akteur `system:scheduler`.
   - `timers` ist nur ein Spiegel der Kern-Zeitgeber, kein Zustand. Veraltete Zeilen löscht der Scheduler.
+- **ingest** (`npm run start:ingest`, Entwicklung: `npm run dev:ingest -w packages/server`): holt Signale und sendet Befehle. Schreibt nie ins Journal.
+  - `INGEST_ADAPTER=twitch|simulator` (Default `twitch`). Der Simulator braucht keine Twitch-Daten: `INGEST_SIM_VIEWERS` (Default 20), `INGEST_SIM_SEED` (Default 1).
+  - Mehrere Worker: `INGEST_WORKERS` (Default 1) und je Prozess `INGEST_WORKER_INDEX` (0 bis Workers − 1). Worker 0 legt das Conduit an, die anderen warten darauf.
+  - Alle 30 s liest er das Kanalverzeichnis: verbundene Kanäle mit gültigem Token. Kanäle in einem offenen Giveaway bekommen Chat, Follow und Anwesenheit je Minute, alle anderen nur Live-Status und Zuschauerzahl.
+  - Je Bündel ein Befehl `apply_signals` je offenem Giveaway des Kanals. In Teilprojekt 4 erzeugt der Befehl noch keine Ereignisse, er prüft Rechte, Zustand und Kanal und löst Twitch-IDs zu `pid`s auf. Teilprojekt 5 hängt Zuschauzeit und Chat-Bonus an.
+  - Twitch-Fehler: drei Versuche mit 1 s, 2 s, 4 s. Danach steht `twitch_error` am Kanal, der nächste Minutenlauf versucht es wieder. Ein abgelehnter Token-Refresh setzt das Token auf `invalid`, der Kanal wird rot, bis der Streamer ihn neu verbindet.
+
+### Bot einrichten
+
+Der Twitch-Adapter liest Chat und sendet Ansagen über ein Bot-Konto des Betreibers.
+
+1. Ein Twitch-Konto für den Bot anlegen oder wählen.
+2. Mit diesem Konto bei Twitch angemeldet `PUBLIC_URL/auth/twitch/bot` öffnen und alle Rechte bestätigen.
+3. Die Twitch-ID des Bot-Kontos als `TWITCH_BOT_USER_ID` setzen (steht nach der Anmeldung in `GET /me/data` unter `identity.twitchId`).
+
+Ohne `TWITCH_BOT_USER_ID` startet der Ingest mit `INGEST_ADAPTER=twitch` nicht.

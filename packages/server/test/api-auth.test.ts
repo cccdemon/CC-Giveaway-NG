@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
+import { BOT_SCOPES } from '../src/api/auth.js';
 import { findPidByTwitchId } from '../src/identity/identities.js';
 import { SESSION_TTL_DAYS } from '../src/identity/sessions.js';
 import { loadChannelToken } from '../src/identity/tokens.js';
@@ -138,6 +139,24 @@ describe('Twitch-Anmeldung', () => {
     expect((await s.app.inject({ method: 'GET', url: '/me', headers: { cookie: fresh.cookie } })).statusCode).toBe(401);
     expect((await s.app.inject({ method: 'GET', url: '/me', headers: { cookie: 'ccg_session=unbekannt' } })).statusCode).toBe(401);
     expect((await s.app.inject({ method: 'POST', url: '/auth/logout' })).statusCode).toBe(204);
+  });
+
+  it('GET /auth/twitch/bot starts a login flow with the bot scopes and the callback signs the bot in', async () => {
+    s = await setupApi();
+    s.twitch.user = { id: '999', login: 'ccg_bot', displayName: 'CCG Bot' };
+    const start = await s.app.inject({ method: 'GET', url: '/auth/twitch/bot' });
+    expect(start.statusCode).toBe(302);
+    const url = new URL(start.headers.location as string);
+    expect(url.searchParams.get('scope')).toBe(BOT_SCOPES.join(' '));
+    const state = url.searchParams.get('state')!;
+    const oauth = cookiesOf(start).ccg_oauth!;
+    const cb = await s.app.inject({ method: 'GET', url: `/auth/twitch/callback?code=bot-code&state=${state}`, headers: { cookie: `ccg_oauth=${oauth}` } });
+    expect(cb.statusCode).toBe(302);
+    expect(cb.headers.location).toBe('/');
+    const session = cookiesOf(cb).ccg_session;
+    expect(session).toBeTruthy();
+    const me = (await s.app.inject({ method: 'GET', url: '/me', headers: { cookie: `ccg_session=${session}` } })).json();
+    expect(me.login).toBe('ccg_bot');
   });
 
   it('return path outside the site falls back to /', async () => {
