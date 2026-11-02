@@ -18,6 +18,7 @@ import {
   type Rng,
   type WinnerStatusCmd,
 } from './giveaway/draw.js';
+import { correctWatchHandler, startBoostHandler, stopBoostHandler, type CorrectWatchCmd, type StartBoostCmd } from './giveaway/boost.js';
 import { registerGiveawayEvents } from './giveaway/events.js';
 import {
   changeSettingsHandler,
@@ -87,6 +88,9 @@ export interface Runtime {
     redraw: Handler<RedrawCmd, GateResult[]>;
     setWinnerStatus: Handler<WinnerStatusCmd>;
     applySignals: Handler<ApplySignalsCmd, ResolvedSignals>;
+    startBoost: Handler<StartBoostCmd, Set<string>>;
+    stopBoost: Handler<GiveawayCmd>;
+    correctWatch: Handler<CorrectWatchCmd>;
   };
 }
 
@@ -112,6 +116,7 @@ export function createRuntime(o: RuntimeOptions): Runtime {
   const loadState = (c: Queryable, stream: string) => loadStreamState(c, registry, stream, reducer);
   const dd: DrawDeps = { ...d, gates: o.gates ?? noGates, rng: o.rng ?? csprng, loadState };
   const od = { ...d, legalSource: o.legalSource ?? noProfile, fetcher: o.fetcher ?? fetchHash, loadState };
+  const activity = o.activity ?? noActivity;
   return {
     kernels,
     registry,
@@ -135,7 +140,10 @@ export function createRuntime(o: RuntimeOptions): Runtime {
       draw: drawHandler(dd),
       redraw: redrawHandler(dd),
       setWinnerStatus: winnerStatusHandler(d),
-      applySignals: applySignalsHandler({ ...d, identities: o.identities ?? noIdentities, activity: o.activity ?? noActivity }),
+      applySignals: applySignalsHandler({ ...d, identities: o.identities ?? noIdentities, activity }),
+      startBoost: startBoostHandler({ ...d, activity }),
+      stopBoost: stopBoostHandler(d),
+      correctWatch: correctWatchHandler(d),
     },
   };
 }

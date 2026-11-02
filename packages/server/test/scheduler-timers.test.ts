@@ -45,6 +45,31 @@ describe('runDueTimers', () => {
     expect(log.error).not.toHaveBeenCalled();
   });
 
+  it('boost_end timer ends the boost via the framework command and clears the row', async () => {
+    const { pool, rt, log } = await setup();
+    await createOpen(rt, { kernelId: 'watchtime', settings: { prize: 'Key', channels: [GID2], config: {} } });
+    await must(rt, rt.handlers.startBoost, { giveawayId: GID, factor: 2, durationSec: 60 });
+    expect(await runDueTimers(pool, rt, at(59), log)).toEqual({ ran: 0, rejected: 0, failed: 0 });
+    expect(await timerRows(pool)).toEqual([{ stream: giveawayStream(GID), key: 'boost_end' }]);
+    expect(await runDueTimers(pool, rt, at(60), log)).toEqual({ ran: 1, rejected: 0, failed: 0 });
+    const last = (await readStream(pool, rt.registry, giveawayStream(GID))).at(-1)!;
+    expect(last).toMatchObject({ type: 'boost_ended', actor: 'system:scheduler', createdAt: at(60) });
+    expect(await timerRows(pool)).toEqual([]);
+    expect(log.error).not.toHaveBeenCalled();
+  });
+
+  it('an unknown framework timer type is dropped as rejected', async () => {
+    const { pool, rt, log } = await setup();
+    await createOpen(rt);
+    await pool.query('INSERT INTO timers (stream, key, due_at, command) VALUES ($1, $2, $3, $4)', [
+      giveawayStream(GID), 'odd', at(0), JSON.stringify({ type: 'framework:nope', args: {} }),
+    ]);
+    const before = await readStream(pool, rt.registry, giveawayStream(GID));
+    expect(await runDueTimers(pool, rt, at(120), log)).toEqual({ ran: 0, rejected: 1, failed: 0 });
+    expect(await timerRows(pool)).toEqual([]);
+    expect(await readStream(pool, rt.registry, giveawayStream(GID))).toEqual(before);
+  });
+
   it('stale timer rows are removed when the command is rejected', async () => {
     const { pool, rt, log } = await setup();
     await createOpen(rt);

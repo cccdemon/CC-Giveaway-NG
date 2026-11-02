@@ -156,6 +156,18 @@ describe('apply_signals', () => {
     expect((await state(s.rt)).seen[P2]).toEqual({ since: AT.toISOString(), channels: [P1] });
   });
 
+  it('boost factor applies to watch and chat, factor 1 after until', async () => {
+    const s = await setup();
+    await must(s.rt, s.rt.handlers.startBoost, { giveawayId: GID, factor: 2, durationSec: 120 });
+    const boosted = await must(s.rt, s.rt.handlers.applySignals, signals({ presence: [ALICE], chat: [chatMsg(ALICE, 'eins zwei drei vier', 3)] }), INGEST);
+    expect(boosted.map((e) => [e.type, (e.payload as { factor: number }).factor])).toEqual([[FRAMEWORK_EVENTS.watchCredited, 2], [FRAMEWORK_EVENTS.chatCredited, 2]]);
+    expect((await kernel(s.rt)).sec).toEqual({ [P2]: { [P1]: 124 } });
+    // until = AT + 120 s: die Minute ab 12:02 liegt nicht mehr im Boost, auch wenn der Scheduler ihn noch nicht beendet hat.
+    const after = await must(s.rt, s.rt.handlers.applySignals, signals({ presence: [ALICE], minute: minuteOf(at(120)) }), { ...INGEST, now: at(125) });
+    expect(after.map((e) => [e.type, (e.payload as { factor: number }).factor])).toEqual([[FRAMEWORK_EVENTS.watchCredited, 1]]);
+    expect((await state(s.rt)).boost).not.toBeNull();
+  });
+
   it('chat bonus needs an active channel and enabled setting', async () => {
     const quiet = await setup({}, { activity: noActivity });
     const events = await must(quiet.rt, quiet.rt.handlers.applySignals, signals({ presence: [ALICE], chat: [chatMsg(ALICE, 'eins zwei drei vier', 0)] }), INGEST);
