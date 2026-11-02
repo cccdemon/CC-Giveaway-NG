@@ -20,6 +20,7 @@ import {
 import { noGates, type GateChecker } from './giveaway/gates.js';
 import { correctWatchHandler, startBoostHandler, stopBoostHandler, type CorrectWatchCmd, type StartBoostCmd } from './giveaway/boost.js';
 import { registerGiveawayEvents } from './giveaway/events.js';
+import { purgeUnregisteredHandler } from './giveaway/purge.js';
 import {
   changeSettingsHandler,
   createGiveawayHandler,
@@ -91,6 +92,7 @@ export interface Runtime {
     startBoost: Handler<StartBoostCmd, Set<string>>;
     stopBoost: Handler<GiveawayCmd>;
     correctWatch: Handler<CorrectWatchCmd>;
+    purgeUnregistered: Handler<GiveawayCmd, string[]>;
   };
 }
 
@@ -144,6 +146,7 @@ export function createRuntime(o: RuntimeOptions): Runtime {
       startBoost: startBoostHandler({ ...d, activity }),
       stopBoost: stopBoostHandler(d),
       correctWatch: correctWatchHandler(d),
+      purgeUnregistered: purgeUnregisteredHandler(d),
     },
   };
 }

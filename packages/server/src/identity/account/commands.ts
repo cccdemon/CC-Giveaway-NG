@@ -160,16 +160,19 @@ export function disconnectChannelHandler(): Handler<AccountCmd> {
   };
 }
 
-/** Die Person selbst oder der Scheduler (Löschfristen, NEW_DESIGN.md 12.4). */
+/**
+ * Die Person selbst oder der Scheduler (Löschfristen, NEW_DESIGN.md 12.4). Der Scheduler darf auch eine Identität
+ * ohne Konto-Strom löschen (Keyword-Anmelder ohne Login), sonst bliebe ihre Zuordnung ewig.
+ */
 export function deleteAccountHandler(): Handler<AccountCmd> {
   return {
     type: 'delete_account',
     streamOf: (cmd) => accountStream(cmd.pid),
     reducer: accountReducer,
     authorize: (cmd, ctx) => (ctx.actor === 'system:scheduler' && typeof cmd.pid === 'string' && UUID_RE.test(cmd.pid) ? null : self(cmd, ctx)),
-    decide(state) {
-      if (!state.exists) return NO_ACCOUNT();
+    decide(state, _cmd, ctx) {
       if (state.deleted) return reject('already_deleted', 'Dieses Konto ist schon gelöscht.');
+      if (!state.exists && ctx.actor !== 'system:scheduler') return NO_ACCOUNT();
       return [{ type: ACCOUNT_EVENTS.deleted, payload: {} }];
     },
   };

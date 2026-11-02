@@ -3,7 +3,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { CommandContext, CommandHandler, CommandResult } from '../src/framework/command-bus.js';
 import { loadStreamState } from '../src/framework/state.js';
 import { ACCOUNT_EVENTS, accountReducer, accountStream, type AccountState } from '../src/identity/account/state.js';
-import { findIdentity } from '../src/identity/identities.js';
+import { findIdentity, upsertIdentity } from '../src/identity/identities.js';
+import { withTx } from '../src/db/pool.js';
 import { createSession, findSession } from '../src/identity/sessions.js';
 import { PLATFORM_TERMS_VERSION } from '../src/identity/terms.js';
 import { loadChannelToken } from '../src/identity/tokens.js';
@@ -220,6 +221,18 @@ describe('Konto-Strom', () => {
     expect(await code(run(rt, accounts.signIn, { pid: PID, soloTeamId: SOLO, user: ALICE }, other))).toBe('not_you');
     expect(await code(run(rt, accounts.signIn, { pid: PID, soloTeamId: SOLO, user: ALICE }, { actor: 'system:scheduler' }))).toBe('not_you');
     expect(await code(run(rt, accounts.deleteAccount, { pid: PID }, { actor: 'system:scheduler' }))).toBe('ok');
+  });
+
+  it('scheduler may delete an identity without account stream, a user may not', async () => {
+    const { pool, rt, accounts } = await setup();
+    await withTx(pool, (c) => upsertIdentity(c, { id: '99', login: 'ghost', displayName: 'Ghost' }, PID2, AT));
+    expect(await code(run(rt, accounts.deleteAccount, { pid: PID2 }, { actor: me(PID2) }))).toBe('no_account');
+    expect(await findIdentity(pool, PID2)).not.toBeNull();
+    const events = await must(rt, accounts.deleteAccount, { pid: PID2 }, { actor: 'system:scheduler' });
+    expect(events.map((e) => [e.type, e.stream])).toEqual([[ACCOUNT_EVENTS.deleted, accountStream(PID2)]]);
+    expect(await findIdentity(pool, PID2)).toBeNull();
+    expect((await state(pool, rt, PID2)).deleted).toBe(true);
+    expect(await code(run(rt, accounts.deleteAccount, { pid: PID2 }, { actor: 'system:scheduler' }))).toBe('already_deleted');
   });
 
   it('attachAccounts twice throws', async () => {

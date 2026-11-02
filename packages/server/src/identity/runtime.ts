@@ -19,6 +19,7 @@ import {
 import { registerAccountEvents } from './account/events.js';
 import { accountsProjector, identityCleanupProjector } from './account/projectors.js';
 import type { AccountState } from './account/state.js';
+import { unregisteredPurgeProjector } from './purge.js';
 
 type Handler<C, P = undefined> = CommandHandler<C, AccountState, P>;
 
@@ -37,6 +38,7 @@ export function attachAccounts(rt: Runtime, o: { tokenKey: Buffer }): AccountHan
   registerAccountEvents(rt.registry);
   rt.projections.registerState(accountsProjector());
   rt.projections.register(identityCleanupProjector());
+  rt.projections.register(unregisteredPurgeProjector());
   return {
     signIn: signInHandler(),
     acceptTerms: acceptTermsHandler(),

@@ -65,7 +65,16 @@ fachlichen Begriffe (Giveaway, Kern, Topf, Chance …) stehen in
 | **Conduit / Shard** | Twitch liefert EventSub-Benachrichtigungen (Chat, Follow, Live-Status) über ein Conduit je Plattform. Jeder Ingest-Worker hält einen Shard davon über eine WebSocket-Verbindung. Kanäle werden per Hash auf Worker verteilt, nur der zuständige Worker pollt die Anwesenheit. |
 | **Plattform-Bot** | Ein Twitch-Konto des Betreibers, über das die Plattform Chat liest und Ansagen sendet. Es erteilt der App einmal die Rechte `user:bot`, `user:read:chat`, `user:write:chat`. Danach reichen App-Tokens. `TWITCH_BOT_USER_ID` ist seine Twitch-ID. |
 | **Signalqualität** | Die Tabelle `channel_status`: live/offline, Zuschauerzahl, Chatters, letztes Signal, Problem. Betriebsdaten des Ingest, kein Nachweis, nicht im Journal. Der Statusblock warnt: rot (Token ungültig), gelb (live ohne Signal über 2 Minuten, Twitch antwortet nicht), Hinweis (Abdeckung unter 50 %). |
-| **Teilprojekt** | Ein Abschnitt des Neubaus mit eigenem Umsetzungsplan (NEW_DESIGN.md, Abschnitt 14). Teilprojekte 1 bis 4 (Fundament, Kern-Vertrag + Kern B, Konten + Identität, Ingest) sind fertig. |
+| **Zuschauzeit** | Der Rahmen-Dienst, der aus der Anwesenheit je Minute das Ereignis `watch_credited` macht: 60 s je anwesender `pid`, je Kanal und Minute genau einmal. Nur Kanäle im Giveaway, nur im Zustand Offen. |
+| **Coin** | Einheit von Kern A: Zuschauzeit ÷ Coin-Basis (Default 2 h), abgerundet. Topf = alle mit mindestens 1 Coin, Gewicht = Coins. |
+| **Chat-Bonus** | Sekunden für Chatnachrichten ab 4 Wörtern (Default +2 s, 10 s Cooldown je Person), gebündelt als `chat_credited` je Kanal und Minute. Zählt nur, wenn der Kanal live ist und Signale liefert. Abschaltbar, Werte bleiben. |
+| **Boost** | Faktor 2 bis 10 für 1 Minute bis 24 Stunden auf Zuschauzeit und Chat-Bonus. Startet nur mit einem aktiven Kanal, läuft über Pausen weiter, das Ende setzt der Scheduler per Zeitgeber `framework:stop_boost`. |
+| **Zeit-Korrektur** | Das Ereignis `watch_corrected`: der Streamer bucht Sekunden nach oder ab, mit Grund. Es ist auch das Gegen-Ereignis jeder Gutschrift (Rückgängig). |
+| **Bedingung** | Follow (alle Kanäle, mindestens N, ein Kanal), Mindestalter des Twitch-Kontos, Mindestalter des Follows, Anwesenheit in N Kanälen. Verbindlich prüft sie die App bei der Ziehung live bei Twitch, vor der Sperre. Antwortet Twitch nicht, bricht die Ziehung ab, ohne Ereignis. |
+| **Zählweise** | Je Giveaway: „ab Anmeldung“ (nur angemeldete Teilnehmer sammeln) oder „ab erstem Erscheinen“ (jeder Anwesende bekommt eine `pid` und sammelt, gewinnen können nur Angemeldete). |
+| **Keyword** | Ein Wort im Chat (z. B. `!werwolf`), mit dem sich ein Zuschauer anmeldet. Erstes Wort der Nachricht, Groß- und Kleinschreibung egal. Dieselben Regeln wie der Knopf im Portal. |
+| **Löschfrist** | Unangemeldete `pid`s der Zählweise „ab erstem Erscheinen“ verlieren ihre Zuordnung Schließen + 7 Tage (einstellbar) nach dem Giveaway: Befehl `purge_unregistered`, Ereignis `unregistered_purged`, die `identities`-Zeile fällt. Nie, wenn die Person ein Konto hat oder in einem anderen laufenden Giveaway steht. |
+| **Teilprojekt** | Ein Abschnitt des Neubaus mit eigenem Umsetzungsplan (NEW_DESIGN.md, Abschnitt 14). Teilprojekte 1 bis 5 (Fundament, Kern-Vertrag + Kern B, Konten + Identität, Ingest, Rahmen-Dienste + Kern A) sind fertig. |
 
 ## Prozesse
 
@@ -77,15 +86,17 @@ Drei Prozesse aus `packages/server`:
   - `GET /me`, `POST /me/terms {version}`, `PUT /me/profile {legal}`, `DELETE /me/channel`, `GET /me/channel` (Statusblock des eigenen Kanals), `GET /me/data` (JSON-Export, Eintrag im Zugriffslog), `DELETE /me` (Löschung).
   - `GET /auth/twitch/bot`: Anmeldung mit dem Bot-Konto, erteilt der App die Bot-Rechte (siehe „Bot einrichten“).
   - Ablehnungen antworten mit `{code, message}`: 401 ohne Sitzung, 403 fremde Person oder fremdes Team, 404 unbekannt, sonst 400.
+  - Nur die App prüft Bedingungen bei der Ziehung (Helix mit dem Token des Streamers und App-Token). Scheduler und Ingest ziehen nicht.
 - **scheduler** (`npm run start:scheduler`): holt sich zuerst den Einzelinstanz-Lock. Ein zweiter Scheduler bricht mit Hinweis ab.
   - Wartung stündlich: Partitionen anlegen, alte IP-Adressen entfernen, abgelaufene Sitzungen löschen, Konten ohne Anmeldung seit 365 Tagen löschen (Befehl mit Akteur `system:scheduler`).
   - Zeitgeber alle 5 s: fällige Einträge aus `timers` laufen als Kern-Befehl mit Akteur `system:scheduler`.
-  - `timers` ist nur ein Spiegel der Kern-Zeitgeber, kein Zustand. Veraltete Zeilen löscht der Scheduler.
+  - `timers` ist nur ein Spiegel der Kern- und Rahmen-Zeitgeber (`framework:stop_boost` beendet einen Boost), kein Zustand. Veraltete Zeilen löscht der Scheduler.
+  - Wartung stündlich zusätzlich: Löschfrist für Unangemeldete (`purge_unregistered` je fälligem Giveaway, Akteur `system:scheduler`).
 - **ingest** (`npm run start:ingest`, Entwicklung: `npm run dev:ingest -w packages/server`): holt Signale und sendet Befehle. Schreibt nie ins Journal.
   - `INGEST_ADAPTER=twitch|simulator` (Default `twitch`). Der Simulator braucht keine Twitch-Daten: `INGEST_SIM_VIEWERS` (Default 20), `INGEST_SIM_SEED` (Default 1).
   - Mehrere Worker: `INGEST_WORKERS` (Default 1) und je Prozess `INGEST_WORKER_INDEX` (0 bis Workers − 1). Worker 0 legt das Conduit an, die anderen warten darauf.
   - Alle 30 s liest er das Kanalverzeichnis: verbundene Kanäle mit gültigem Token. Kanäle in einem offenen Giveaway bekommen Chat, Follow und Anwesenheit je Minute, alle anderen nur Live-Status und Zuschauerzahl.
-  - Je Bündel ein Befehl `apply_signals` je offenem Giveaway des Kanals. In Teilprojekt 4 erzeugt der Befehl noch keine Ereignisse, er prüft Rechte, Zustand und Kanal und löst Twitch-IDs zu `pid`s auf. Teilprojekt 5 hängt Zuschauzeit und Chat-Bonus an.
+  - Je Bündel ein Befehl `apply_signals` je offenem Giveaway des Kanals. Er prüft Rechte, Zustand und Kanal, löst Twitch-IDs zu `pid`s auf (legt sie in der Zählweise „ab erstem Erscheinen“ und für Keyword-Schreiber an) und schreibt Keyword-Anmeldung, `watch_credited` und `chat_credited`. Signale für Kanäle, die nicht live sind oder keine Signale liefern, bringen keinen Chat-Bonus.
   - Twitch-Fehler: drei Versuche mit 1 s, 2 s, 4 s. Danach steht `twitch_error` am Kanal, der nächste Minutenlauf versucht es wieder. Ein abgelehnter Token-Refresh setzt das Token auf `invalid`, der Kanal wird rot, bis der Streamer ihn neu verbindet.
 
 ### Bot einrichten
