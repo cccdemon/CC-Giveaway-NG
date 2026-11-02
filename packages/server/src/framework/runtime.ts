@@ -34,7 +34,7 @@ import { noProfile, openGiveawayHandler, type LegalSource, type OpenPre, type Op
 import { fetchHash, type LegalFetcher } from './legal.js';
 import { giveawaysProjector, participantsProjector, timersProjector } from './giveaway/projectors.js';
 import { registerHandler, withdrawHandler, type RegisterCmd } from './giveaway/registration.js';
-import { applySignalsHandler, noIdentities, type ApplySignalsCmd, type IdentityResolver, type ResolvedSignals } from './giveaway/signals.js';
+import { applySignalsHandler, noActivity, noIdentities, type ApplySignalsCmd, type ChannelActivity, type IdentityResolver, type ResolvedSignals } from './giveaway/signals.js';
 import { makeGiveawayReducer, type GiveawayState } from './giveaway/state.js';
 import { defaultKernels, type KernelRegistry } from './kernel-registry.js';
 import { ProjectionRegistry } from './projections.js';
@@ -57,6 +57,8 @@ export interface RuntimeOptions {
   fetcher?: LegalFetcher;
   /** Twitch-ID → pid für apply_signals (NEW_DESIGN.md 9.1). Default: keine Zuordnung. */
   identities?: IdentityResolver;
+  /** Welche Kanäle live sind und Signale liefern (NEW_DESIGN.md 6.2, 6.3). Default: keiner. */
+  activity?: ChannelActivity;
 }
 
 type Handler<C, P = undefined, Q = undefined> = CommandHandler<C, GiveawayState, P, Q>;
@@ -133,7 +135,7 @@ export function createRuntime(o: RuntimeOptions): Runtime {
       draw: drawHandler(dd),
       redraw: redrawHandler(dd),
       setWinnerStatus: winnerStatusHandler(d),
-      applySignals: applySignalsHandler({ ...d, identities: o.identities ?? noIdentities }),
+      applySignals: applySignalsHandler({ ...d, identities: o.identities ?? noIdentities, activity: o.activity ?? noActivity }),
     },
   };
 }

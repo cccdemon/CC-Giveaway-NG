@@ -1,4 +1,5 @@
 // Tabelle identities: die einzige Stelle mit Twitch-Daten (NEW_DESIGN.md 9.1). Löschen entfernt die Zeile (12.4).
+import { randomUUID } from 'node:crypto';
 import type pg from 'pg';
 import type { Queryable } from '../db/pool.js';
 
@@ -61,6 +62,29 @@ export async function findPidsByTwitchIds(db: Queryable, twitchIds: string[]): P
   if (twitchIds.length === 0) return new Map();
   const r = await db.query<{ twitch_id: string; pid: string }>('SELECT twitch_id, pid FROM identities WHERE twitch_id = ANY($1)', [twitchIds]);
   return new Map(r.rows.map((row) => [row.twitch_id, row.pid]));
+}
+
+/**
+ * Legt fehlende Identitäten an (Zählweise „ab erstem Erscheinen“, Keyword-Anmeldung, NEW_DESIGN.md 6.1).
+ * Vorhandene Zeilen bleiben unverändert. Liefert die pid je übergebener twitch_id.
+ */
+export async function createIdentities(c: pg.PoolClient, users: TwitchUser[], now: Date): Promise<Map<string, string>> {
+  const seen = new Set<string>();
+  const unique = users.filter((u) => (seen.has(u.id) ? false : (seen.add(u.id), true)));
+  if (unique.length === 0) return new Map();
+  await c.query(
+    `INSERT INTO identities (pid, twitch_id, login, display_name, created_at, last_seen_at)
+     SELECT * FROM unnest($1::uuid[], $2::text[], $3::text[], $4::text[], $5::timestamptz[], $5::timestamptz[])
+     ON CONFLICT (twitch_id) DO NOTHING`,
+    [unique.map(() => randomUUID()), unique.map((u) => u.id), unique.map((u) => u.login), unique.map((u) => u.displayName), unique.map(() => now)],
+  );
+  return findPidsByTwitchIds(c, unique.map((u) => u.id));
+}
+
+export async function findTwitchIdsByPids(db: Queryable, pids: string[]): Promise<Map<string, string>> {
+  if (pids.length === 0) return new Map();
+  const r = await db.query<{ pid: string; twitch_id: string }>('SELECT pid, twitch_id FROM identities WHERE pid = ANY($1::uuid[])', [pids]);
+  return new Map(r.rows.map((row) => [row.pid, row.twitch_id]));
 }
 
 export const TOUCH_MIN_MS = 3_600_000;

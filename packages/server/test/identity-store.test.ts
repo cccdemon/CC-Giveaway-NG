@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { afterEach, describe, expect, it } from 'vitest';
 import { withTx } from '../src/db/pool.js';
-import { deleteIdentity, displayNameOf, findIdentity, findPidByTwitchId, upsertIdentity } from '../src/identity/identities.js';
+import { createIdentities, deleteIdentity, displayNameOf, findIdentity, findPidByTwitchId, findPidsByTwitchIds, upsertIdentity } from '../src/identity/identities.js';
 import { SESSION_TTL_DAYS, createSession, deleteSession, deleteSessionsOf, findSession, purgeExpiredSessions } from '../src/identity/sessions.js';
 import { deleteChannelToken, loadChannelToken, markTokenInvalid, saveChannelToken } from '../src/identity/tokens.js';
 import { AT, freshDb } from './helpers/db.js';
@@ -31,6 +31,21 @@ describe('identities', () => {
     expect(await findIdentity(db.pool, PID2)).toBeNull();
     expect(await findPidByTwitchId(db.pool, '12345')).toBe(PID);
     expect(await findPidByTwitchId(db.pool, '999')).toBeNull();
+  });
+
+  it('createIdentities inserts only missing twitch ids and returns all pids', async () => {
+    const db = await freshDb();
+    close = db.close;
+    await withTx(db.pool, (c) => upsertIdentity(c, ALICE, PID, day(-1)));
+    const bob = { id: '67890', login: 'bob', displayName: 'Bob' };
+    const map = await withTx(db.pool, (c) => createIdentities(c, [ALICE, bob], AT));
+    expect(map.get(ALICE.id)).toBe(PID);
+    const bobPid = map.get(bob.id)!;
+    expect(bobPid).not.toBe(PID);
+    expect(await findIdentity(db.pool, PID)).toMatchObject({ lastSeenAt: day(-1), login: 'alice' });
+    expect(await findIdentity(db.pool, bobPid)).toMatchObject({ twitchId: bob.id, login: 'bob', displayName: 'Bob', createdAt: AT, lastSeenAt: AT });
+    expect(await withTx(db.pool, (c) => createIdentities(c, [], AT))).toEqual(new Map());
+    expect(await findPidsByTwitchIds(db.pool, [bob.id])).toEqual(new Map([[bob.id, bobPid]]));
   });
 
   it('deleteIdentity removes the row', async () => {

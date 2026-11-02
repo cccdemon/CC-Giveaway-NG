@@ -12,6 +12,7 @@ import { identityResolver } from '../identity/resolver.js';
 import { attachAccounts } from '../identity/runtime.js';
 import { twitchAuthClient } from '../identity/twitch.js';
 import { ensurePartitions } from '../journal/partitions.js';
+import { pgChannelActivity } from '../ingest/channel-status.js';
 import { buildApp } from './build-app.js';
 
 async function main() {
@@ -28,7 +29,7 @@ async function main() {
   await ensurePartitions(pool, new Date(), 2);
   const redis = new Redis(config.redisUrl);
   const log = { error: (obj: object, msg: string) => console.error(JSON.stringify({ msg, ...obj })) };
-  const rt = createRuntime({ pool, publisher: new RedisPublisher(redis), auth: accountAuthorizer(), legalSource: accountLegalSource(), identities: identityResolver(), log });
+  const rt = createRuntime({ pool, publisher: new RedisPublisher(redis), auth: accountAuthorizer(), legalSource: accountLegalSource(), identities: identityResolver(), activity: pgChannelActivity(), log });
   const accounts = attachAccounts(rt, { tokenKey });
   const twitch = twitchAuthClient({ clientId: config.twitchClientId, clientSecret: config.twitchClientSecret });
   const app = buildApp(

@@ -8,6 +8,7 @@ import type { CreateGiveawayCmd } from '../../src/framework/giveaway/lifecycle.j
 import { loadStreamState } from '../../src/framework/state.js';
 import { InMemoryPublisher, type Publisher } from '../../src/framework/publisher.js';
 import { createRuntime, type Runtime, type RuntimeOptions } from '../../src/framework/runtime.js';
+import { allActive } from '../../src/framework/giveaway/signals.js';
 import type { LegalSource } from '../../src/framework/giveaway/open.js';
 import type { LegalFetcher, LegalTexts } from '../../src/framework/legal.js';
 import type { Pid } from '../../src/kernel-api/index.js';
@@ -37,7 +38,7 @@ export async function setupGiveaway(
 ): Promise<{ pool: pg.Pool; rt: Runtime; publisher: InMemoryPublisher | Publisher; close(): Promise<void> }> {
   const db = await freshDb();
   const publisher = over.publisher ?? new InMemoryPublisher();
-  const rt = createRuntime({ auth: allowAll, log: { error: vi.fn() }, legalSource: fullLegalSource, fetcher: fakeFetcher, ...over, pool: db.pool, publisher });
+  const rt = createRuntime({ auth: allowAll, log: { error: vi.fn() }, legalSource: fullLegalSource, fetcher: fakeFetcher, activity: allActive, ...over, pool: db.pool, publisher });
   pools.set(rt, db.pool);
   return { pool: db.pool, rt, publisher, close: db.close };
 }

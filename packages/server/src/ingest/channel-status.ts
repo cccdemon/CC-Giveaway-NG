@@ -1,6 +1,24 @@
 // Tabelle channel_status: Signalqualität je Kanal (NEW_DESIGN.md 11.2). Betriebsdaten, schreibt der Ingest direkt.
 import type { Queryable } from '../db/pool.js';
+import type { ChannelActivity } from '../framework/giveaway/signals.js';
 import type { Pid } from '../kernel-api/index.js';
+
+/** Ein Live-Kanal ohne Signal länger als das gilt als still (NEW_DESIGN.md 11.2). */
+export const SIGNAL_STALE_MS = 120_000;
+
+/** Kanäle, die live sind und in den letzten 2 Minuten ein Signal lieferten. Für Chat-Bonus und Boost (NEW_DESIGN.md 6.2, 6.3). */
+export function pgChannelActivity(): ChannelActivity {
+  return {
+    async active(db, channels, now) {
+      if (channels.length === 0) return new Set();
+      const r = await db.query<{ pid: string }>(
+        'SELECT pid FROM channel_status WHERE pid = ANY($1::uuid[]) AND live AND last_signal_at >= $2',
+        [channels, new Date(now.getTime() - SIGNAL_STALE_MS)],
+      );
+      return new Set(r.rows.map((x) => x.pid));
+    },
+  };
+}
 
 export interface ChannelStatusRow {
   pid: Pid;

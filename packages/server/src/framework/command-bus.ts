@@ -38,8 +38,8 @@ export interface CommandHandler<C, S, P = undefined, Q = undefined> {
   pre?(cmd: C, ctx: CommandContext, db: Queryable): Promise<Q>;
   /** In der Transaktion, VOR der Stromsperre. Darf lesen. */
   authorize(cmd: C, ctx: CommandContext, c: pg.PoolClient): Rejection | null | Promise<Rejection | null>;
-  /** Läuft nach der Stromsperre in derselben Transaktion. Für Daten, die nicht im Reducer-Zustand stehen. Kein Netz-I/O. */
-  prepare?(c: pg.PoolClient, cmd: C, ctx: CommandContext, pre: Q): Promise<P>;
+  /** Läuft nach der Stromsperre in derselben Transaktion, sieht den gesperrten Zustand. Für Daten außerhalb des Zustands. Kein Netz-I/O. */
+  prepare?(c: pg.PoolClient, cmd: C, ctx: CommandContext, pre: Q, state: S): Promise<P>;
   decide(state: S, cmd: C, ctx: CommandContext, prepared: P): NewEvent[] | Rejection;
 }
 
@@ -106,7 +106,7 @@ export class CommandBus {
     const stream = h.streamOf(cmd);
     const lastSeq = await lockStream(c, stream);
     const state = await this.loadState(c, stream, h.reducer);
-    const prepared = h.prepare ? await h.prepare(c, cmd, ctx, pre) : (undefined as P);
+    const prepared = h.prepare ? await h.prepare(c, cmd, ctx, pre, state) : (undefined as P);
     const decided = h.decide(state, cmd, ctx, prepared);
     if (isRejection(decided)) throw new RejectionSignal(decided);
     const events = await appendLocked(c, this.d.registry, {

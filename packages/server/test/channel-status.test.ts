@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { withTx } from '../src/db/pool.js';
 import { findIdentity, touchIdentities, upsertIdentity } from '../src/identity/identities.js';
 import { loadChannelToken, saveChannelToken, updateChannelToken } from '../src/identity/tokens.js';
-import { StatusBuffer, deleteChannelStatus, readChannelStatus, upsertChannelStatus } from '../src/ingest/channel-status.js';
+import { StatusBuffer, deleteChannelStatus, pgChannelActivity, readChannelStatus, upsertChannelStatus } from '../src/ingest/channel-status.js';
 import { COVERAGE_MIN, SIGNAL_STALE_MS, channelStatusView, channelWarning } from '../src/ingest/status-view.js';
 import { KEY, connect, login, setupApi, type ApiSetup } from './helpers/api.js';
 import { AT, freshDb } from './helpers/db.js';
@@ -33,6 +33,17 @@ describe('channel_status', () => {
     expect((await readChannelStatus(db.pool, [PID2])).size).toBe(0);
     await deleteChannelStatus(db.pool, PID);
     expect((await readChannelStatus(db.pool, [PID])).size).toBe(0);
+  });
+
+  it('pgChannelActivity returns live channels with a fresh signal only', async () => {
+    const db = await freshDb();
+    close = db.close;
+    const PID3 = '99999999-9999-4999-8999-999999999999';
+    await upsertChannelStatus(db.pool, PID, { live: true, lastSignalAt: at(-60) }, at(-60));
+    await upsertChannelStatus(db.pool, PID2, { live: true, lastSignalAt: at(-121) }, at(-121));
+    await upsertChannelStatus(db.pool, PID3, { live: false, lastSignalAt: at(-1) }, at(-1));
+    expect(await pgChannelActivity().active(db.pool, [PID, PID2, PID3, '11111111-1111-4111-8111-111111111111'], AT)).toEqual(new Set([PID]));
+    expect(await pgChannelActivity().active(db.pool, [], AT)).toEqual(new Set());
   });
 
   it('live true sets live_since once, live false clears it', async () => {

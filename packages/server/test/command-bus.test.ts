@@ -126,6 +126,22 @@ describe('CommandBus', () => {
     },
   });
 
+  it('prepare receives the locked state', async () => {
+    const { bus } = await setup();
+    await bus.execute(incrementHandler, { stream: STREAM, by: 3 }, ctx());
+    const seen: unknown[] = [];
+    const peeking: CommandHandler<{ stream: string; by: number }, { total: number }, undefined> = {
+      ...incrementHandler,
+      prepare: async (_c, _cmd, _ctx, _pre, state) => {
+        seen.push(state);
+        return undefined;
+      },
+    };
+    const res = await bus.execute(peeking, { stream: STREAM, by: 1 }, ctx());
+    expect(res.ok).toBe(true);
+    expect(seen).toEqual([{ total: 3 }]);
+  });
+
   it('retries once on seq conflict', async () => {
     const { pool, bus } = await setup();
     await bus.execute(incrementHandler, { stream: STREAM, by: 1 }, ctx());

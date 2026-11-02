@@ -10,6 +10,7 @@ import { createRuntime } from '../framework/runtime.js';
 import { accountLegalSource } from '../identity/account/legal-source.js';
 import { loadTokenKey } from '../identity/crypto.js';
 import { identityResolver } from '../identity/resolver.js';
+import { pgChannelActivity } from '../ingest/channel-status.js';
 import { buildIngest } from './build.js';
 
 const log: BusLogger = {
@@ -31,7 +32,7 @@ async function main() {
   }
   const pool = createPool(config.databaseUrl);
   const redis = new Redis(config.redisUrl);
-  const rt = createRuntime({ pool, publisher: new RedisPublisher(redis), auth: denyUsers, legalSource: accountLegalSource(), identities: identityResolver(), log });
+  const rt = createRuntime({ pool, publisher: new RedisPublisher(redis), auth: denyUsers, legalSource: accountLegalSource(), identities: identityResolver(), activity: pgChannelActivity(), log });
   const { worker } = buildIngest(config, { pool, rt, tokenKey, log });
   await worker.start();
   console.log(JSON.stringify({ msg: 'Ingest läuft.', adapter: config.ingestAdapter, worker: config.ingestWorkerIndex, workers: config.ingestWorkers }));

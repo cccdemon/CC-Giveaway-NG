@@ -19,7 +19,8 @@ export interface ChannelStatusView {
   warning: ChannelWarning;
 }
 
-export const SIGNAL_STALE_MS = 120_000;
+import { SIGNAL_STALE_MS } from './channel-status.js';
+export { SIGNAL_STALE_MS };
 export const COVERAGE_MIN = 0.5;
 
 const RECONNECT_TOKEN = 'Kanal neu verbinden. Das Twitch-Token ist abgelaufen oder ein Recht fehlt.';
