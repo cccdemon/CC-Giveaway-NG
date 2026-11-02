@@ -75,8 +75,17 @@ export interface Conduit {
   shardCount: number;
 }
 
+export interface HelixUser {
+  id: string;
+  login: string;
+  displayName: string;
+  createdAt: string;
+}
+
 export interface HelixClient {
   getStreams(userIds: string[]): Promise<StreamInfo[]>;
+  /** Get Users in Blöcken zu 100, für das Kontoalter (NEW_DESIGN.md 6.5). */
+  getUsers(ids: string[]): Promise<HelixUser[]>;
   getChatters(broadcasterId: string, userToken: string): Promise<SignalUser[]>;
   isFollower(broadcasterId: string, userId: string, userToken: string): Promise<FollowResult>;
   sendChatMessage(broadcasterId: string, senderId: string, text: string): Promise<SendResult>;
@@ -176,6 +185,20 @@ export function helixClient(o: HelixOptions): HelixClient {
         for (const s of data(r.body)) {
           if (s.type === 'live' && typeof s.user_id === 'string') {
             out.push({ userId: s.user_id, live: true, viewers: typeof s.viewer_count === 'number' ? s.viewer_count : 0, startedAt: String(s.started_at ?? '') });
+          }
+        }
+      }
+      return out;
+    },
+
+    async getUsers(ids) {
+      const out: HelixUser[] = [];
+      for (let i = 0; i < ids.length; i += IDS_PER_CALL) {
+        const chunk = ids.slice(i, i + IDS_PER_CALL);
+        const r = await call({ method: 'GET', path: '/users', query: chunk.map((id): [string, string] => ['id', id]) });
+        for (const u of data(r.body)) {
+          if (typeof u.id === 'string') {
+            out.push({ id: u.id, login: String(u.login ?? ''), displayName: String(u.display_name ?? ''), createdAt: String(u.created_at ?? '') });
           }
         }
       }

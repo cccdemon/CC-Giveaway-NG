@@ -1,6 +1,10 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CommandResult } from '../src/framework/command-bus.js';
-import { poolHash, rngFrom, type GateChecker, type WinnerStatusCmd } from '../src/framework/giveaway/draw.js';
+import { poolHash, rngFrom, type WinnerStatusCmd } from '../src/framework/giveaway/draw.js';
+import { GateCheckError, type GateChecker } from '../src/framework/giveaway/gates.js';
+import type { IdentityResolver } from '../src/framework/giveaway/signals.js';
+import { minuteOf } from '../src/ingest/bundler.js';
+import { AT } from './helpers/db.js';
 import { defaultKernels } from '../src/framework/kernel-registry.js';
 import { GIVEAWAY_EVENTS, giveawayStream } from '../src/framework/giveaway/state.js';
 import { EVENT_VOIDED } from '../src/framework/revert.js';
@@ -223,6 +227,90 @@ describe('Ziehung', () => {
       gates: [ok(P1), { pid: P2, ok: false, reasons: ['no_result'] }, ok(P3)],
     });
   });
+  it('gates run in pre with the pool pids and the proof lists them', async () => {
+    const check = vi.fn(async (_db: unknown, input: { pids: string[] }) => input.pids.map(ok));
+    const { rt } = await setup([0], { gates: { check } });
+    await createOpen(rt, { settings: { prize: 'Key', channels: [P1], gates: [{ id: 'follow', mode: 'all' }] } });
+    await openWindow(rt);
+    for (const pid of [P1, P2]) await must(rt, rt.handlers.register, { giveawayId: GID, pid }, { actor: userOf(pid) });
+    await must(rt, rt.handlers.close, { giveawayId: GID });
+    const [e] = await must(rt, rt.handlers.draw, draw);
+    expect(check).toHaveBeenCalledOnce();
+    expect(check.mock.calls[0]![1]).toEqual({ channels: [P1], gates: [{ id: 'follow', mode: 'all' }], pids: [P1, P2], seen: {}, now: AT });
+    expect(e!.payload).toMatchObject({ winners: [P1], gates: [ok(P1), ok(P2)] });
+  });
+
+  it('a GateCheckError aborts the draw with its code and writes nothing', async () => {
+    const gates: GateChecker = {
+      check: async () => {
+        throw new GateCheckError('token_invalid', 'Ein Kanal des Giveaways ist nicht verbunden. Verbinde ihn neu, dann ziehe.');
+      },
+    };
+    const { pool, rt } = await setup([0], { gates });
+    await closedWith(rt, [P1, P2]);
+    expect(await run(rt, rt.handlers.draw, draw)).toEqual({
+      ok: false,
+      rejection: { rejected: true, code: 'token_invalid', message: 'Ein Kanal des Giveaways ist nicht verbunden. Verbinde ihn neu, dann ziehe.' },
+    });
+    const types = (await readStream(pool, rt.registry, giveawayStream(GID))).map((e) => e.type);
+    expect(types).not.toContain(GIVEAWAY_EVENTS.drawn);
+    expect((await state(rt)).status).toBe('closed');
+  });
+
+  it('a pool that changed between pre and prepare rejects with pool_changed', async () => {
+    const ref: { rt?: Rt; done: boolean } = { done: false };
+    const gates: GateChecker = {
+      check: async (_db, input) => {
+        // Zwischen Prüfung (ohne Sperre) und Sperre zieht sich P2 zurück: der Nachweis passt nicht mehr zum Topf.
+        if (!ref.done) {
+          ref.done = true;
+          await must(ref.rt!, ref.rt!.handlers.withdraw, { giveawayId: GID, pid: P2 }, { actor: userOf(P2) });
+        }
+        return input.pids.map(ok);
+      },
+    };
+    const { pool, rt } = await setup([0], { gates });
+    ref.rt = rt;
+    await closedWith(rt, [P1, P2]);
+    expect(await run(rt, rt.handlers.draw, draw)).toEqual({ ok: false, rejection: { rejected: true, code: 'pool_changed', message: 'Der Topf hat sich geändert. Ziehe erneut.' } });
+    const types = (await readStream(pool, rt.registry, giveawayStream(GID))).map((e) => e.type);
+    expect(types).not.toContain(GIVEAWAY_EVENTS.drawn);
+    expect(await code(run(rt, rt.handlers.draw, draw))).toBe('ok');
+  });
+
+  it('unregistered seen pids with coins are excluded with not_registered', async () => {
+    const ALICE = { id: '12345', login: 'alice', displayName: 'Alice' };
+    const BOB = { id: '67890', login: 'bob', displayName: 'Bob' };
+    const identities: IdentityResolver = {
+      resolve: async (_c, ids) => new Map(ids.map((id) => [id, id === ALICE.id ? P2 : P3])),
+      create: async () => new Map(),
+      touch: async () => {},
+    };
+    const { rt } = await setup([0], { identities });
+    await createOpen(rt, { kernelId: 'watchtime', settings: { prize: 'Key', channels: [P1], config: { coinBaseSec: 60 }, counting: 'first_seen' } });
+    await must(rt, rt.handlers.register, { giveawayId: GID, pid: P3 }, { actor: userOf(P3) });
+    await must(rt, rt.handlers.applySignals, { giveawayId: GID, channel: P1, minute: minuteOf(AT), presence: [ALICE, BOB], chat: [], follows: [] }, { actor: 'system:ingest' });
+    await must(rt, rt.handlers.close, { giveawayId: GID });
+    const [e] = await must(rt, rt.handlers.draw, draw);
+    expect(e!.payload).toMatchObject({
+      winners: [P3],
+      pool: [{ pid: P3, weight: 1 }],
+      gates: [{ pid: P2, ok: false, reasons: ['not_registered'] }, ok(P3)],
+    });
+  });
+
+  it('noGates refuses to draw with configured gates', async () => {
+    const { rt } = await setup([0]);
+    await createOpen(rt, { settings: { prize: 'Key', channels: [P1], gates: [{ id: 'follow', mode: 'all' }] } });
+    await openWindow(rt);
+    await must(rt, rt.handlers.register, { giveawayId: GID, pid: P1 }, { actor: userOf(P1) });
+    await must(rt, rt.handlers.close, { giveawayId: GID });
+    expect(await run(rt, rt.handlers.draw, draw)).toEqual({
+      ok: false,
+      rejection: { rejected: true, code: 'no_checker', message: 'Bedingungen lassen sich in diesem Prozess nicht prüfen. Ziehe in der App.' },
+    });
+  });
+
   it('revert of a registration after the draw is too late', async () => {
     const { pool, rt } = await setup([0.5]);
     await closedWith(rt, [P1, P2]);

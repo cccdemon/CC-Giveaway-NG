@@ -28,6 +28,7 @@ function fakeHelix() {
     getStreams: vi.fn<HelixClient['getStreams']>(async () => [{ userId: '1001', live: true, viewers: 50, startedAt: '2026-10-15T11:30:00Z' }] as StreamInfo[]),
     getChatters: vi.fn<HelixClient['getChatters']>(async () => [ALICE]),
     isFollower: vi.fn<HelixClient['isFollower']>(async (_b, userId) => ({ userId, follows: userId === ALICE.id, since: userId === ALICE.id ? '2026-01-01T00:00:00.000Z' : null })),
+    getUsers: vi.fn<HelixClient['getUsers']>(async () => []),
     sendChatMessage: vi.fn<HelixClient['sendChatMessage']>(async () => ({ ok: true, messageId: 'msg-1' })),
   };
   return h;

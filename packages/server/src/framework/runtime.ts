@@ -7,17 +7,17 @@ import type { GiveawayAuthorizer } from './giveaway/authorize.js';
 import {
   csprng,
   drawHandler,
-  noGates,
   redrawHandler,
   winnerStatusHandler,
   type DrawCmd,
   type DrawDeps,
-  type GateChecker,
-  type GateResult,
+  type DrawPre,
+  type DrawPrepared,
   type RedrawCmd,
   type Rng,
   type WinnerStatusCmd,
 } from './giveaway/draw.js';
+import { noGates, type GateChecker } from './giveaway/gates.js';
 import { correctWatchHandler, startBoostHandler, stopBoostHandler, type CorrectWatchCmd, type StartBoostCmd } from './giveaway/boost.js';
 import { registerGiveawayEvents } from './giveaway/events.js';
 import {
@@ -84,8 +84,8 @@ export interface Runtime {
     withdraw: Handler<RegisterCmd>;
     kernelCommand: Handler<KernelCommandCmd>;
     revert: Handler<RevertCommand, RevertPrepared>;
-    draw: Handler<DrawCmd, GateResult[]>;
-    redraw: Handler<RedrawCmd, GateResult[]>;
+    draw: Handler<DrawCmd, DrawPrepared, DrawPre>;
+    redraw: Handler<RedrawCmd, DrawPrepared, DrawPre>;
     setWinnerStatus: Handler<WinnerStatusCmd>;
     applySignals: Handler<ApplySignalsCmd, ResolvedSignals>;
     startBoost: Handler<StartBoostCmd, Set<string>>;

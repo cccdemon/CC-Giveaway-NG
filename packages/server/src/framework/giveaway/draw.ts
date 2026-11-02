@@ -1,14 +1,19 @@
 // Ziehung, Ersatzziehung und Gewinnerstatus (NEW_DESIGN.md 7.2, 7.3). Das Ereignis giveaway_drawn ist der Nachweis.
+// Die Bedingungen prüft `pre` außerhalb der Sperre (Helix). `prepare` stellt sicher, dass der Topf noch derselbe ist.
 import { createHash, randomBytes } from 'node:crypto';
-import type pg from 'pg';
+import type { Queryable } from '../../db/pool.js';
 import type { DrawMode, Pid, PoolEntry } from '../../kernel-api/index.js';
 import type { StreamId } from '../../journal/types.js';
 import { reject, type Rejection } from '../../shared/rejection.js';
-import type { CommandHandler } from '../command-bus.js';
+import type { CommandContext, CommandHandler } from '../command-bus.js';
 import { EVENT_VOIDED } from '../revert.js';
 import { GIVEAWAY_NOT_FOUND, authorizeControl } from './authorize.js';
+import { GateCheckError, type GateChecker, type GateResult } from './gates.js';
 import type { GiveawayDeps } from './lifecycle.js';
-import { GIVEAWAY_EVENTS, giveawayStream, type GateConfig, type GiveawayState, type WinnerStatus } from './state.js';
+import { GIVEAWAY_EVENTS, giveawayStream, type GiveawayState, type GiveawayStatus, type WinnerStatus } from './state.js';
+
+export type { GateChecker, GateResult } from './gates.js';
+export { noGates } from './gates.js';
 
 export type Rng = () => number; // in [0, 1)
 
@@ -78,28 +83,14 @@ export function drawWinners(pool: PoolEntry[], mode: DrawMode, count: number, rn
   }
 }
 
-export interface GateResult {
-  pid: Pid;
-  ok: boolean;
-  reasons: string[];
-}
-
-export interface GateChecker {
-  check(c: pg.PoolClient, gates: GateConfig[], pids: Pid[]): Promise<GateResult[]>;
-}
-
-export const noGates: GateChecker = {
-  check: async (_c, _gates, pids) => pids.map((pid) => ({ pid, ok: true, reasons: [] })),
-};
-
 /**
- * `prepare` läuft vor `decide` und ohne Zustand. `loadState` liest den Strom innerhalb der Stromsperre derselben
- * Transaktion, darum sieht `prepare` denselben Zustand wie `decide`. Die Runtime liefert dafür loadStreamState.
+ * `pre` läuft vor der Transaktion ohne Sperre und holt die Fakten bei Twitch. `loadState` liest dafür den Strom.
+ * `prepare` vergleicht in der Sperre den Topf mit dem aus `pre`. Die Runtime liefert loadStreamState.
  */
 export interface DrawDeps extends GiveawayDeps {
   gates: GateChecker;
   rng: Rng;
-  loadState(c: pg.PoolClient, stream: StreamId): Promise<GiveawayState>;
+  loadState(c: Queryable, stream: StreamId): Promise<GiveawayState>;
 }
 
 export interface DrawCmd {
@@ -118,25 +109,57 @@ export interface WinnerStatusCmd {
   status: WinnerStatus;
 }
 
+export type DrawPre =
+  | { kind: 'skip' }
+  | { kind: 'failed'; code: string; message: string }
+  | { kind: 'ready'; pids: Pid[]; gates: GateResult[] };
+
+export type DrawPrepared = DrawPre | { kind: 'changed' };
+
 const SETTABLE: readonly WinnerStatus[] = ['reported', 'shipped', 'done', 'forfeited'];
 
 const NOT_A_WINNER = (): Rejection => reject('not_a_winner', 'Diese Person ist kein Gewinner.');
 const NOT_DRAWN_REDRAW = (): Rejection => reject('not_drawn', 'Es gibt keine gültige Ziehung, die du ersetzen könntest.');
+const POOL_CHANGED = (): Rejection => reject('pool_changed', 'Der Topf hat sich geändert. Ziehe erneut.');
 
 function kernelPool(d: DrawDeps, state: GiveawayState): PoolEntry[] {
   return d.kernels.get(state.kernelId).pool(state.kernelState, state.settings.config);
 }
 
-/** Bedingungen für alle Einträge des Kern-Topfs. Ohne passenden Zustand leer, decide lehnt dann ab.
- *  Genau ein Ergebnis je pid des Topfs: fremde und doppelte Ergebnisse fallen weg, fehlende gelten als nicht erfüllt. */
-function checkGates(d: DrawDeps, status: GiveawayState['status']) {
-  return async (c: pg.PoolClient, cmd: { giveawayId: string }): Promise<GateResult[]> => {
-    const state = await d.loadState(c, giveawayStream(cmd.giveawayId));
-    if (!state.exists || state.status !== status) return [];
+const sortedPids = (d: DrawDeps, state: GiveawayState): Pid[] => kernelPool(d, state).map((p) => p.pid).sort();
+
+/** Bedingungen für alle Einträge des Kern-Topfs, außerhalb der Sperre. Ohne passenden Zustand `skip`, decide lehnt dann ab. */
+function checkGates(d: DrawDeps, status: GiveawayStatus) {
+  return async (cmd: { giveawayId: string }, ctx: CommandContext, db: Queryable): Promise<DrawPre> => {
+    const state = await d.loadState(db, giveawayStream(cmd.giveawayId));
+    if (!state.exists || state.status !== status) return { kind: 'skip' };
     const pids = kernelPool(d, state).map((p) => p.pid);
-    const results = await d.gates.check(c, state.settings.gates, pids);
-    return pids.map((pid) => results.find((r) => r.pid === pid) ?? { pid, ok: false, reasons: ['no_result'] });
+    const seen = Object.fromEntries(Object.entries(state.seen).map(([pid, s]) => [pid, s.channels]));
+    try {
+      const results = await d.gates.check(db, { channels: state.settings.channels, gates: state.settings.gates, pids, seen, now: ctx.now });
+      // Genau ein Ergebnis je pid des Topfs: fremde und doppelte Ergebnisse fallen weg, fehlende gelten als nicht erfüllt.
+      const gates = pids.map((pid) => results.find((r) => r.pid === pid) ?? { pid, ok: false, reasons: ['no_result'] });
+      return { kind: 'ready', pids: [...pids].sort(), gates };
+    } catch (e) {
+      if (e instanceof GateCheckError) return { kind: 'failed', code: e.code, message: e.message };
+      throw e;
+    }
   };
+}
+
+/** In der Sperre: Ist der Topf noch derselbe wie bei der Prüfung? */
+function comparePool(d: DrawDeps) {
+  return async (_c: unknown, _cmd: unknown, _ctx: CommandContext, pre: DrawPre, state: GiveawayState): Promise<DrawPrepared> => {
+    if (pre.kind !== 'ready') return pre;
+    const now = sortedPids(d, state);
+    return now.length === pre.pids.length && now.every((pid, i) => pid === pre.pids[i]) ? pre : { kind: 'changed' };
+  };
+}
+
+/** Anmeldung als eingebaute Bedingung: Nutzt der Kern den Dienst registration, fällt jeder Unangemeldete heraus (Glossar: Teilnehmer). */
+function withRegistration(d: DrawDeps, state: GiveawayState, gates: GateResult[]): GateResult[] {
+  if (!d.kernels.get(state.kernelId).usesServices.includes('registration')) return gates;
+  return gates.map((g) => (g.pid in state.registered ? g : { pid: g.pid, ok: false, reasons: ['not_registered', ...g.reasons] }));
 }
 
 /** Kern-Topf ohne Einträge, die eine Bedingung verfehlen, in `without` stehen oder kein positives Gewicht haben. */
@@ -149,16 +172,32 @@ function emptyPool(d: DrawDeps, state: GiveawayState): Rejection {
   return reject('empty_pool', d.kernels.get(state.kernelId).display.emptyPool);
 }
 
-export function drawHandler(d: DrawDeps): CommandHandler<DrawCmd, GiveawayState, GateResult[]> {
+/** Gemeinsame Prüfung des Prüfergebnisses. Liefert die Bedingungsergebnisse oder eine Ablehnung. */
+function gatesOf(d: DrawDeps, state: GiveawayState, prepared: DrawPrepared): GateResult[] | Rejection {
+  switch (prepared.kind) {
+    case 'failed':
+      return reject(prepared.code, prepared.message);
+    case 'changed':
+    case 'skip':
+      return POOL_CHANGED();
+    case 'ready':
+      return withRegistration(d, state, prepared.gates);
+  }
+}
+
+export function drawHandler(d: DrawDeps): CommandHandler<DrawCmd, GiveawayState, DrawPrepared, DrawPre> {
   return {
     type: 'draw',
     streamOf: (cmd) => giveawayStream(cmd.giveawayId),
     reducer: d.reducer,
     authorize: authorizeControl(d.auth),
-    prepare: checkGates(d, 'closed'),
-    decide(state, _cmd, _ctx, gates) {
+    pre: checkGates(d, 'closed'),
+    prepare: comparePool(d),
+    decide(state, _cmd, _ctx, prepared) {
       if (!state.exists) return GIVEAWAY_NOT_FOUND();
       if (state.status !== 'closed') return reject('not_closed', 'Schließe das Giveaway, bevor du ziehst.');
+      const gates = gatesOf(d, state, prepared);
+      if (!Array.isArray(gates)) return gates;
       const pool = eligible(d, state, gates, []);
       if (pool.length === 0) return emptyPool(d, state);
       const mode = d.kernels.get(state.kernelId).drawMode;
@@ -171,19 +210,22 @@ export function drawHandler(d: DrawDeps): CommandHandler<DrawCmd, GiveawayState,
   };
 }
 
-export function redrawHandler(d: DrawDeps): CommandHandler<RedrawCmd, GiveawayState, GateResult[]> {
+export function redrawHandler(d: DrawDeps): CommandHandler<RedrawCmd, GiveawayState, DrawPrepared, DrawPre> {
   return {
     type: 'redraw',
     streamOf: (cmd) => giveawayStream(cmd.giveawayId),
     reducer: d.reducer,
     authorize: authorizeControl(d.auth),
-    prepare: checkGates(d, 'drawn'),
-    decide(state, cmd, _ctx, gates) {
+    pre: checkGates(d, 'drawn'),
+    prepare: comparePool(d),
+    decide(state, cmd, _ctx, prepared) {
       if (!state.exists) return GIVEAWAY_NOT_FOUND();
       if (state.status !== 'drawn') return NOT_DRAWN_REDRAW();
       if (typeof cmd.reason !== 'string' || !cmd.reason.trim()) return reject('reason_required', 'Gib einen Grund für die Ersatzziehung an.');
       const target = state.draws.find((r) => !r.voided && r.winners.includes(cmd.replace));
       if (!target || !Object.hasOwn(state.winners, cmd.replace)) return NOT_A_WINNER();
+      const gates = gatesOf(d, state, prepared);
+      if (!Array.isArray(gates)) return gates;
       const excluded = [cmd.replace, ...target.excluded.filter((p) => p !== cmd.replace)];
       const pool = eligible(d, state, gates, [...Object.keys(state.winners), ...excluded]);
       if (pool.length === 0) return emptyPool(d, state);
