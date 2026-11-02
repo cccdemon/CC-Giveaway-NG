@@ -1,16 +1,17 @@
 // Ereignistypen des Stroms giveaway:<id>: Rahmen-Typen, je Kern dessen Typen, dazu event_voided.
 import { z } from 'zod';
-import type { GateId, KernelEventDef, KernelReversal } from '../../kernel-api/index.js';
+import type { KernelEventDef, KernelReversal } from '../../kernel-api/index.js';
 import type { EventTypeRegistry, ReversalSpec } from '../../journal/event-types.js';
 import { canonicalJson } from '../../shared/canonical.js';
 import { reject } from '../../shared/rejection.js';
 import type { KernelRegistry } from '../kernel-registry.js';
 import { frozenLegalSchema, legalSchema } from '../legal.js';
 import { registerRevertTypes } from '../revert.js';
+import { GATE_IDS } from './gates.js';
 import { NOT_REGISTERED_TEXT, TOO_LATE, TOO_LATE_TEXT } from './registration.js';
+import { KEYWORD_RE, PURGE_DAYS_MAX, PURGE_DAYS_MIN, chatBonusSchema, countingSchema, registerServiceEvents, upcastSettingsV1 } from './services.js';
 import { GIVEAWAY_EVENTS, type GiveawaySettings, type GiveawayState, type GiveawayStatus, type WinnerStatus } from './state.js';
 
-const GATE_IDS = ['follow', 'account_age', 'follow_age', 'presence'] as const satisfies readonly GateId[];
 const STATUSES = ['draft', 'open', 'paused', 'closed', 'drawn', 'completed', 'cancelled'] as const satisfies readonly GiveawayStatus[];
 const WINNER_STATUSES = ['pending', 'reported', 'shipped', 'done', 'forfeited'] as const satisfies readonly WinnerStatus[];
 
@@ -22,9 +23,19 @@ const settingsSchema = z.object({
   winnersCount: z.int().min(1).max(100),
   claimDays: z.int().min(1).max(90),
   gates: z.array(z.looseObject({ id: z.enum(GATE_IDS) })),
-  // Optional: Ereignisse vor Teilprojekt 3 haben das Feld nicht. Der Reducer normalisiert auf null.
-  legal: legalSchema.nullable().optional(),
+  legal: legalSchema.nullable(),
+  counting: countingSchema,
+  purgeDays: z.int().min(PURGE_DAYS_MIN).max(PURGE_DAYS_MAX),
+  keyword: z.string().regex(KEYWORD_RE).nullable(),
+  chatBonus: chatBonusSchema,
 });
+
+/** v1 → v2: legal und die Felder der Dienste (Teilprojekt 5) mit Defaults. */
+const upcastCreatedV1 = (p: unknown): unknown => ({ ...(p as object), settings: upcastSettingsV1((p as { settings: unknown }).settings) });
+const upcastSettingsChangedV1 = (p: unknown): unknown => {
+  const { before, after } = p as { before: unknown; after: unknown };
+  return { before: upcastSettingsV1(before), after: upcastSettingsV1(after) };
+};
 
 const pidSchema = z.object({ pid: z.uuid() });
 
@@ -52,13 +63,14 @@ function registerKernelEvent(registry: EventTypeRegistry, def: KernelEventDef): 
 export function registerGiveawayEvents(registry: EventTypeRegistry, kernels: KernelRegistry): void {
   registry.register({
     type: GIVEAWAY_EVENTS.created,
-    version: 1,
+    version: 2,
     schema: z.object({
       teamId: z.uuid(),
       kernelId: z.string().min(1),
       kernelVersion: z.int().min(1),
       settings: settingsSchema,
     }),
+    upcasters: { 1: upcastCreatedV1 },
     reversal: { kind: 'none', why: 'Einen Entwurf nimmst du nicht zurück. Brich das Giveaway ab.' },
   });
 
@@ -78,8 +90,9 @@ export function registerGiveawayEvents(registry: EventTypeRegistry, kernels: Ker
 
   registry.register({
     type: GIVEAWAY_EVENTS.settingsChanged,
-    version: 1,
+    version: 2,
     schema: z.object({ before: settingsSchema, after: settingsSchema }),
+    upcasters: { 1: upcastSettingsChangedV1 },
     reversal: {
       kind: 'compensate',
       inverse(target, state) {
@@ -157,6 +170,8 @@ export function registerGiveawayEvents(registry: EventTypeRegistry, kernels: Ker
       },
     },
   });
+
+  registerServiceEvents(registry);
 
   for (const kernel of kernels.list()) {
     for (const def of kernel.events) registerKernelEvent(registry, def);

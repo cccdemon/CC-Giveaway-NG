@@ -35,7 +35,7 @@ async function giveawayRow(pool: pg.Pool, id = GID) {
 
 async function participantRows(pool: pg.Pool, id = GID) {
   const r = await pool.query(
-    'SELECT pid, registered, in_pool, weight, winner_status FROM giveaway_participants WHERE giveaway_id = $1 ORDER BY pid',
+    'SELECT pid, registered, in_pool, weight, winner_status, seen FROM giveaway_participants WHERE giveaway_id = $1 ORDER BY pid',
     [id],
   );
   return r.rows;
@@ -72,12 +72,22 @@ describe('Lesetabellen des Giveaways', () => {
     });
   });
 
+  it('giveaways row carries counting, purge_days and closed_at', async () => {
+    const { pool, rt } = await setup();
+    await createOpen(rt, { settings: { prize: 'Key', channels: [P1], counting: 'first_seen', purgeDays: 3 } });
+    expect(await giveawayRow(pool)).toMatchObject({ counting: 'first_seen', purge_days: 3, closed_at: null, purged_at: null, boost: null });
+    await must(rt, rt.handlers.close, { giveawayId: GID }, { now: new Date('2026-10-16T12:00:00Z') });
+    expect(await giveawayRow(pool)).toMatchObject({ closed_at: new Date('2026-10-16T12:00:00Z') });
+    await must(rt, rt.handlers.reopen, { giveawayId: GID });
+    expect(await giveawayRow(pool)).toMatchObject({ closed_at: null });
+  });
+
   it('participants rows follow registration, pool and winner status', async () => {
     const { pool, rt } = await setup();
     await createOpen(rt);
     await openWindow(rt);
     await registerAll(rt, [P1, P2]);
-    const row = (pid: string, winner_status: string | null = null) => ({ pid, registered: true, in_pool: true, weight: 1, winner_status });
+    const row = (pid: string, winner_status: string | null = null) => ({ pid, registered: true, in_pool: true, weight: 1, winner_status, seen: false });
     expect(await participantRows(pool)).toEqual([row(P1), row(P2)]);
     await must(rt, rt.handlers.withdraw, { giveawayId: GID, pid: P2 }, { actor: userOf(P2) });
     expect(await participantRows(pool)).toEqual([row(P1)]);

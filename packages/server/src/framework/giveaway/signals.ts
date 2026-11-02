@@ -8,6 +8,7 @@ import { reject, type Rejection } from '../../shared/rejection.js';
 import type { CommandContext, CommandHandler } from '../command-bus.js';
 import { GIVEAWAY_NOT_FOUND, INVALID_ID, UUID_RE, loadGiveawayRow } from './authorize.js';
 import type { GiveawayDeps } from './lifecycle.js';
+import { MINUTE_RE } from './services.js';
 import { giveawayStream, type GiveawayState } from './state.js';
 
 /** Zuordnung Twitch-ID → pid über identities. Die Umsetzung liegt in identity/resolver.ts. */
@@ -39,7 +40,7 @@ export interface ResolvedSignals {
   unknown: number;
 }
 
-export const MINUTE_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:00\.000Z$/;
+export { MINUTE_RE } from './services.js';
 
 const NOT_INGEST = (): Rejection => reject('not_ingest', 'Signale nimmt nur der Ingest an.');
 const NOT_OPEN = (): Rejection => reject('not_open', 'Das Giveaway sammelt gerade nicht. Signale gehen nur im Zustand Offen.');

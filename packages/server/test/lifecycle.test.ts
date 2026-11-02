@@ -3,7 +3,7 @@ import { denyUsers } from '../src/framework/giveaway/authorize.js';
 import { GIVEAWAY_EVENTS, giveawayStream } from '../src/framework/giveaway/state.js';
 import type { CommandResult } from '../src/framework/command-bus.js';
 import { readStream } from '../src/journal/journal.js';
-import { GID, GID2, GID3, GID4, P1, STREAMER, TEAM, at, createOpen, must, run, setupGiveaway, state } from './helpers/giveaway.js';
+import { GID, GID2, GID3, GID4, P1, P2, STREAMER, TEAM, at, createOpen, must, run, setupGiveaway, state } from './helpers/giveaway.js';
 
 let close: (() => Promise<void>) | undefined;
 afterEach(async () => close?.());
@@ -36,14 +36,51 @@ describe('Lebenszyklus', () => {
       teamId: TEAM,
       kernelId: 'instant',
       kernelVersion: 1,
-      settings: { config: { windowSec: 120 }, prize: 'Key', sponsor: null, channels: [P1], winnersCount: 1, claimDays: 14, gates: [], legal: null },
+      settings: {
+        config: { windowSec: 120 }, prize: 'Key', sponsor: null, channels: [P1], winnersCount: 1, claimDays: 14, gates: [], legal: null,
+        counting: 'registered', purgeDays: 7, keyword: null, chatBonus: { enabled: true, sec: 2, minWords: 4, cooldownSec: 10 },
+      },
     });
+    expect(events[0]!.typeVersion).toBe(2);
     const row = (await pool.query('SELECT * FROM giveaways WHERE id = $1', [GID])).rows[0];
     expect(row).toMatchObject({
       id: GID, status: 'draft', team_id: TEAM, kernel: 'instant', kernel_version: 1, claim_days: 14, winners_count: 1,
       prize: 'Key', sponsor: null, config: { windowSec: 120 }, channels: [P1], gates: [],
       registered_count: 0, pool_size: 0, pool_weight: 0, last_seq: 1,
+      counting: 'registered', purge_days: 7, closed_at: null, purged_at: null, boost: null,
     });
+  });
+
+  it('create rejects bad counting, purgeDays, keyword, chatBonus and gate configs', async () => {
+    const { rt } = await setup();
+    const c = (settings: Record<string, unknown>, over: Record<string, unknown> = {}) => code(run(rt, rt.handlers.create, createCmd(over, settings)));
+    expect(await c({ counting: 'always' })).toBe('invalid_counting');
+    expect(await c({ purgeDays: 0 })).toBe('invalid_purge_days');
+    expect(await c({ purgeDays: 91 })).toBe('invalid_purge_days');
+    expect(await c({ keyword: 'zwei wörter' })).toBe('invalid_keyword');
+    expect(await c({ keyword: 'x' })).toBe('invalid_keyword');
+    expect(await c({ chatBonus: { enabled: true, sec: 0, minWords: 4, cooldownSec: 10 } })).toBe('invalid_chat_bonus');
+    expect(await c({ chatBonus: { enabled: true } })).toBe('invalid_chat_bonus');
+    expect(await c({ gates: [{ id: 'follow', mode: 'channel', channel: P2 }] })).toBe('invalid_gate');
+    expect(await c({ gates: [{ id: 'follow', mode: 'min', min: 2 }] })).toBe('invalid_gate');
+    expect(await c({ gates: [{ id: 'account_age', days: 0 }] })).toBe('invalid_gate');
+    expect(await c({ gates: [{ id: 'presence', minChannels: 2 }], config: {} }, { kernelId: 'watchtime' })).toBe('invalid_gate');
+    const ok = await run(rt, rt.handlers.create, createCmd({ kernelId: 'watchtime' }, {
+      config: {}, counting: 'first_seen', purgeDays: 30, keyword: '!werwolf',
+      chatBonus: { enabled: false, sec: 5, minWords: 2, cooldownSec: 30 },
+      gates: [{ id: 'follow', mode: 'channel', channel: P1 }, { id: 'account_age', days: 30 }, { id: 'follow_age', days: 7 }, { id: 'presence', minChannels: 1 }],
+    }));
+    expect(ok.ok).toBe(true);
+    expect((await state(rt)).settings).toMatchObject({ counting: 'first_seen', purgeDays: 30, keyword: '!werwolf', chatBonus: { enabled: false, sec: 5, minWords: 2, cooldownSec: 30 } });
+  });
+
+  it('change_settings merges chatBonus field by field', async () => {
+    const { rt } = await setup();
+    await createOpen(rt);
+    await must(rt, rt.handlers.changeSettings, { giveawayId: GID, settings: { chatBonus: { enabled: false } } as never });
+    expect((await state(rt)).settings.chatBonus).toEqual({ enabled: false, sec: 2, minWords: 4, cooldownSec: 10 });
+    await must(rt, rt.handlers.changeSettings, { giveawayId: GID, settings: { keyword: '!go', counting: 'first_seen' } });
+    expect((await state(rt)).settings).toMatchObject({ keyword: '!go', counting: 'first_seen', chatBonus: { enabled: false } });
   });
 
   it('create rejects: duplicate, unknown kernel, bad config, no prize, no channel, bad counts, unsupported gate', async () => {

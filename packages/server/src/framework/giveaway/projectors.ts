@@ -25,15 +25,17 @@ export function giveawaysProjector(kernels: KernelRegistry): StateProjector<Give
       const poolWeight = pool.reduce((sum, e) => sum + e.weight, 0);
       await c.query(
         `INSERT INTO giveaways (id, team_id, kernel, kernel_version, status, prize, sponsor, winners_count, claim_days,
-           config, channels, gates, registered_count, pool_size, pool_weight, last_seq, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $17)
+           config, channels, gates, registered_count, pool_size, pool_weight, last_seq, created_at, updated_at,
+           counting, purge_days, closed_at, purged_at, boost)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $17, $18, $19, $20, $21, $22)
          ON CONFLICT (id) DO UPDATE SET
            team_id = EXCLUDED.team_id, kernel = EXCLUDED.kernel, kernel_version = EXCLUDED.kernel_version,
            status = EXCLUDED.status, prize = EXCLUDED.prize, sponsor = EXCLUDED.sponsor,
            winners_count = EXCLUDED.winners_count, claim_days = EXCLUDED.claim_days, config = EXCLUDED.config,
            channels = EXCLUDED.channels, gates = EXCLUDED.gates, registered_count = EXCLUDED.registered_count,
            pool_size = EXCLUDED.pool_size, pool_weight = EXCLUDED.pool_weight, last_seq = EXCLUDED.last_seq,
-           updated_at = EXCLUDED.updated_at`,
+           updated_at = EXCLUDED.updated_at, counting = EXCLUDED.counting, purge_days = EXCLUDED.purge_days,
+           closed_at = EXCLUDED.closed_at, purged_at = EXCLUDED.purged_at, boost = EXCLUDED.boost`,
         [
           idOf(stream),
           state.teamId,
@@ -52,6 +54,11 @@ export function giveawaysProjector(kernels: KernelRegistry): StateProjector<Give
           poolWeight,
           head.seq,
           head.at,
+          s.counting,
+          s.purgeDays,
+          state.closedAt === null ? null : new Date(state.closedAt),
+          state.purgedAt === null ? null : new Date(state.purgedAt),
+          state.boost === null ? null : JSON.stringify(state.boost),
         ],
       );
     },
@@ -63,8 +70,8 @@ export function giveawaysProjector(kernels: KernelRegistry): StateProjector<Give
 }
 
 /**
- * Eine Zeile je angemeldetem oder im Topf stehendem Teilnehmer. Die Chance wird nicht gespeichert
- * (Gewicht ÷ giveaways.pool_weight beim Lesen). Schreibt bei jedem Befehl alle Zeilen neu (TP5 macht das inkrementell).
+ * Eine Zeile je angemeldetem, gesehenem oder im Topf stehendem Teilnehmer. Die Chance wird nicht gespeichert
+ * (Gewicht ÷ giveaways.pool_weight beim Lesen). Schreibt bei jedem Befehl alle Zeilen in einer Anweisung neu.
  */
 export function participantsProjector(kernels: KernelRegistry): StateProjector<GiveawayState> {
   return {
@@ -75,18 +82,25 @@ export function participantsProjector(kernels: KernelRegistry): StateProjector<G
       const id = idOf(stream);
       const pool = kernels.get(state.kernelId).pool(state.kernelState, state.settings.config);
       const weights = new Map(pool.map((e) => [e.pid, e.weight]));
-      const pids = [...new Set([...Object.keys(state.registered), ...weights.keys()])];
+      const pids = [...new Set([...Object.keys(state.registered), ...weights.keys(), ...Object.keys(state.seen)])];
       await c.query('DELETE FROM giveaway_participants WHERE giveaway_id = $1 AND NOT (pid = ANY($2::uuid[]))', [id, pids]);
-      for (const pid of pids) {
-        await c.query(
-          `INSERT INTO giveaway_participants (giveaway_id, pid, registered, in_pool, weight, winner_status)
-           VALUES ($1, $2, $3, $4, $5, $6)
-           ON CONFLICT (giveaway_id, pid) DO UPDATE SET
-             registered = EXCLUDED.registered, in_pool = EXCLUDED.in_pool, weight = EXCLUDED.weight,
-             winner_status = EXCLUDED.winner_status`,
-          [id, pid, pid in state.registered, weights.has(pid), weights.get(pid) ?? 0, state.winners[pid] ?? null],
-        );
-      }
+      if (pids.length === 0) return;
+      await c.query(
+        `INSERT INTO giveaway_participants (giveaway_id, pid, registered, in_pool, weight, winner_status, seen)
+         SELECT $1::uuid, * FROM unnest($2::uuid[], $3::bool[], $4::bool[], $5::float8[], $6::text[], $7::bool[])
+         ON CONFLICT (giveaway_id, pid) DO UPDATE SET
+           registered = EXCLUDED.registered, in_pool = EXCLUDED.in_pool, weight = EXCLUDED.weight,
+           winner_status = EXCLUDED.winner_status, seen = EXCLUDED.seen`,
+        [
+          id,
+          pids,
+          pids.map((pid) => pid in state.registered),
+          pids.map((pid) => weights.has(pid)),
+          pids.map((pid) => weights.get(pid) ?? 0),
+          pids.map((pid) => state.winners[pid] ?? null),
+          pids.map((pid) => pid in state.seen),
+        ],
+      );
     },
     async reset(c: pg.PoolClient, stream?: StreamId) {
       if (stream === undefined) await c.query('DELETE FROM giveaway_participants');
@@ -95,7 +109,11 @@ export function participantsProjector(kernels: KernelRegistry): StateProjector<G
   };
 }
 
-/** Zeitgeber des Kerns. Nur ein offenes Giveaway hat Zeitgeber. Der Scheduler liest die Tabelle. */
+/** Zeitgeber des Rahmens tragen dieses Präfix im Befehlstyp. Der Scheduler ruft dafür den Rahmen-Befehl. */
+export const FRAMEWORK_TIMER_PREFIX = 'framework:';
+export const BOOST_END_TIMER = { key: 'boost_end', type: `${FRAMEWORK_TIMER_PREFIX}stop_boost` } as const;
+
+/** Zeitgeber des Kerns (nur Offen) und des Rahmens (Boost-Ende, jeder Zustand). Der Scheduler liest die Tabelle. */
 export function timersProjector(kernels: KernelRegistry): StateProjector<GiveawayState> {
   return {
     name: 'timers',
@@ -104,6 +122,7 @@ export function timersProjector(kernels: KernelRegistry): StateProjector<Giveawa
       if (!state.exists) return;
       const kernel = kernels.get(state.kernelId);
       const specs = state.status === 'open' ? (kernel.timers?.(state.kernelState, state.settings.config) ?? []) : [];
+      if (state.boost !== null) specs.push({ key: BOOST_END_TIMER.key, dueAt: state.boost.until, command: { type: BOOST_END_TIMER.type, args: {} } });
       await c.query('DELETE FROM timers WHERE stream = $1 AND NOT (key = ANY($2::text[]))', [stream, specs.map((t) => t.key)]);
       for (const t of specs) {
         await c.query(

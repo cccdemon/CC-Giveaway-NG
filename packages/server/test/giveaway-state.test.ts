@@ -13,7 +13,11 @@ import {
 import { EventTypeRegistry } from '../src/journal/event-types.js';
 import { JournalError, type EventRecord } from '../src/journal/types.js';
 import { INSTANT_EVENTS, type InstantState } from '../src/kernels/instant/index.js';
+import type { WatchtimeState } from '../src/kernels/watchtime/index.js';
+import { SERVICE_DEFAULTS, SERVICE_EVENT_TYPES, boostFactor } from '../src/framework/giveaway/services.js';
+import { FRAMEWORK_EVENTS } from '../src/kernel-api/index.js';
 import { isRejection } from '../src/shared/rejection.js';
+import { kernelsWithPlain } from './helpers/plain-kernel.js';
 
 const GID = '11111111-1111-4111-8111-111111111111';
 const TEAM = '22222222-2222-4222-8222-222222222222';
@@ -40,7 +44,7 @@ function rec(seq: number, type: string, payload: unknown, over: Partial<EventRec
   };
 }
 
-const settings = {
+const legacySettings = {
   config: { windowSec: 120 },
   prize: 'Spiel-Schlüssel',
   sponsor: null,
@@ -49,9 +53,15 @@ const settings = {
   claimDays: 14,
   gates: [],
 };
+const settings = { ...legacySettings, legal: null, ...SERVICE_DEFAULTS };
+const MINUTE = '2026-10-28T12:00:00.000Z';
 
-const created = (seq = 1) =>
-  rec(seq, GIVEAWAY_EVENTS.created, { teamId: TEAM, kernelId: 'instant', kernelVersion: 1, settings });
+const created = (seq = 1, kernelId = 'instant') =>
+  rec(seq, GIVEAWAY_EVENTS.created, { teamId: TEAM, kernelId, kernelVersion: 1, settings: { ...settings, config: kernelId === 'instant' ? settings.config : {} } }, { typeVersion: 2 });
+const credited = (seq: number, entries: { pid: string; sec: number }[], channel = CH, factor = 1) =>
+  rec(seq, FRAMEWORK_EVENTS.watchCredited, { minute: MINUTE, channel, factor, entries });
+const chatCredited = (seq: number, entries: { pid: string; sec: number; lastAt: string }[], channel = CH, factor = 1) =>
+  rec(seq, FRAMEWORK_EVENTS.chatCredited, { minute: MINUTE, channel, factor, entries });
 const status = (seq: number, from: string, to: string) => rec(seq, GIVEAWAY_EVENTS.statusChanged, { from, to });
 const drawn = (seq: number, winners: string[]) =>
   rec(seq, GIVEAWAY_EVENTS.drawn, {
@@ -88,7 +98,13 @@ describe('giveaway reducer', () => {
     expect(s.draws).toEqual([]);
     expect(s.winners).toEqual({});
     expect(s.kernelState).toBeNull();
-    expect(s.settings).toEqual({ config: {}, prize: '', sponsor: null, channels: [], winnersCount: 1, claimDays: 14, gates: [], legal: null });
+    expect(s.settings).toEqual({ config: {}, prize: '', sponsor: null, channels: [], winnersCount: 1, claimDays: 14, gates: [], legal: null, ...SERVICE_DEFAULTS });
+    expect(s.seen).toEqual({});
+    expect(s.watchMinutes).toEqual({});
+    expect(s.chatLast).toEqual({});
+    expect(s.boost).toBeNull();
+    expect(s.closedAt).toBeNull();
+    expect(s.purgedAt).toBeNull();
   });
 
   it('created sets draft and kernel initial state', () => {
@@ -100,8 +116,7 @@ describe('giveaway reducer', () => {
     expect(s.teamId).toBe(TEAM);
     expect(s.kernelId).toBe('instant');
     expect(s.kernelVersionAtCreate).toBe(1);
-    // Ereignisse vor Teilprojekt 3 haben kein legal. Der Reducer ergänzt null.
-    expect(s.settings).toEqual({ ...settings, legal: null });
+    expect(s.settings).toEqual(settings);
     expect(s.status).toBe('draft');
     expect(s.kernelState).toEqual({ registered: [], window: null, windowsOpened: 0 });
   });
@@ -126,7 +141,72 @@ describe('giveaway reducer', () => {
   it('settings_changed replaces settings', () => {
     const after = { ...settings, prize: 'Neu' };
     const s = reduce([created(), rec(2, GIVEAWAY_EVENTS.settingsChanged, { before: settings, after })]);
-    expect(s.settings).toEqual({ ...after, legal: null });
+    expect(s.settings).toEqual(after);
+  });
+
+  it('watch_credited and chat_credited update seen, watchMinutes and chatLast', () => {
+    const lastAt = '2026-10-28T12:00:30.000Z';
+    const s = reduce([
+      created(1, 'watchtime'),
+      status(2, 'draft', 'open'),
+      credited(3, [{ pid: P1, sec: 60 }]),
+      chatCredited(4, [{ pid: P2, sec: 2, lastAt }]),
+      credited(5, [{ pid: P1, sec: 60 }], P3),
+    ]);
+    expect(s.seen).toEqual({ [P1]: { since: AT.toISOString(), channels: [CH, P3] }, [P2]: { since: AT.toISOString(), channels: [CH] } });
+    expect(s.watchMinutes).toEqual({ [CH]: MINUTE, [P3]: MINUTE });
+    expect(s.chatLast).toEqual({ [P2]: lastAt });
+    expect((s.kernelState as WatchtimeState).sec).toEqual({ [P1]: { [CH]: 60, [P3]: 60 }, [P2]: { [CH]: 2 } });
+  });
+
+  it('boost_started sets boost with eventId, boost_ended clears it, boostFactor respects until and since', () => {
+    const until = '2026-10-28T12:10:00.000Z';
+    const s = reduce([created(), status(2, 'draft', 'open'), rec(3, SERVICE_EVENT_TYPES.boostStarted, { factor: 3, until })]);
+    expect(s.boost).toEqual({ factor: 3, since: AT.toISOString(), until, eventId: '3' });
+    expect(boostFactor(s.boost, '2026-10-28T12:05:00.000Z')).toBe(3);
+    expect(boostFactor(s.boost, '2026-10-28T12:00:00.000Z')).toBe(3);
+    expect(boostFactor(s.boost, '2026-10-28T12:10:00.000Z')).toBe(1);
+    expect(boostFactor(s.boost, '2026-10-28T11:59:00.000Z')).toBe(1);
+    expect(boostFactor(null, '2026-10-28T12:05:00.000Z')).toBe(1);
+    const ended = reducer.apply(s, rec(4, SERVICE_EVENT_TYPES.boostEnded, {}));
+    expect(ended.boost).toBeNull();
+    expect(s.boost).not.toBeNull();
+  });
+
+  it('closedAt is set on closed and cancelled, cleared on open, purgedAt on unregistered_purged', () => {
+    const later = new Date('2026-10-28T13:00:00.000Z');
+    const s1 = reduce([created(), status(2, 'draft', 'open'), rec(3, GIVEAWAY_EVENTS.statusChanged, { from: 'open', to: 'closed' }, { createdAt: later })]);
+    expect(s1.closedAt).toBe(later.toISOString());
+    const s2 = reducer.apply(s1, status(4, 'closed', 'open'));
+    expect(s2.closedAt).toBeNull();
+    const s3 = reducer.apply(s2, status(5, 'open', 'cancelled'));
+    expect(s3.closedAt).toBe(AT.toISOString());
+    const s4 = reducer.apply(s3, rec(6, SERVICE_EVENT_TYPES.unregisteredPurged, { pids: [P1] }, { createdAt: later }));
+    expect(s4.purgedAt).toBe(later.toISOString());
+    expect(s3.purgedAt).toBeNull();
+  });
+
+  it('a kernel only receives events of its services', () => {
+    const plainReducer = makeGiveawayReducer(kernelsWithPlain());
+    const base = [created(1, 'plain'), status(2, 'draft', 'open')];
+    const s1 = base.reduce((s, e) => plainReducer.apply(s, e), plainReducer.initial());
+    const s2 = plainReducer.apply(s1, credited(3, [{ pid: P1, sec: 60 }]));
+    expect(s2.kernelState).toBe(s1.kernelState);
+    expect(s2.seen[P1]).toBeDefined();
+    const w = reduce([created(1, 'watchtime'), status(2, 'draft', 'open'), credited(3, [{ pid: P1, sec: 60 }], CH, 2)]);
+    expect((w.kernelState as WatchtimeState).sec).toEqual({ [P1]: { [CH]: 120 } });
+  });
+
+  it('v1 created and settings_changed payloads upcast to the defaults', () => {
+    const registry = new EventTypeRegistry();
+    registerGiveawayEvents(registry, kernels);
+    const c = registry.upcast(rec(1, GIVEAWAY_EVENTS.created, { teamId: TEAM, kernelId: 'instant', kernelVersion: 1, settings: legacySettings }));
+    expect(c.typeVersion).toBe(2);
+    expect((c.payload as { settings: unknown }).settings).toEqual(settings);
+    const withLegal = { ...legacySettings, legal: { impressumUrl: 'https://x.example/i', terms: null, privacyUrl: null } };
+    const sc = registry.upcast(rec(2, GIVEAWAY_EVENTS.settingsChanged, { before: legacySettings, after: withLegal }));
+    expect(sc.payload).toEqual({ before: settings, after: { ...settings, legal: withLegal.legal } });
+    expect(reducer.apply(reducer.initial(), c).settings).toEqual(settings);
   });
 
   it('registered and withdrawn maintain the registration list', () => {
@@ -245,6 +325,55 @@ describe('registerGiveawayEvents', () => {
       why: 'Einen Entwurf nimmst du nicht zurück. Brich das Giveaway ab.',
     });
     expect(registry.get(GIVEAWAY_EVENTS.drawn).reversal).toEqual({ kind: 'void' });
+  });
+
+  it('service payloads are validated, watch_corrected needs a reason', () => {
+    const ok = { minute: MINUTE, channel: CH, factor: 1, entries: [{ pid: P1, sec: 60 }] };
+    expect(code(() => registry.prepare({ type: FRAMEWORK_EVENTS.watchCredited, payload: ok }))).toBeUndefined();
+    expect(code(() => registry.prepare({ type: FRAMEWORK_EVENTS.watchCredited, payload: { ...ok, entries: [] } }))).toBe('invalid_payload');
+    expect(code(() => registry.prepare({ type: FRAMEWORK_EVENTS.watchCredited, payload: { ...ok, entries: [{ pid: P1, sec: 0 }] } }))).toBe('invalid_payload');
+    expect(code(() => registry.prepare({ type: FRAMEWORK_EVENTS.watchCredited, payload: { ...ok, minute: '2026-10-28T12:00:01.000Z' } }))).toBe('invalid_payload');
+    expect(code(() => registry.prepare({ type: FRAMEWORK_EVENTS.chatCredited, payload: ok }))).toBe('invalid_payload');
+    expect(code(() => registry.prepare({ type: FRAMEWORK_EVENTS.chatCredited, payload: { ...ok, entries: [{ pid: P1, sec: 2, lastAt: AT.toISOString() }] } }))).toBeUndefined();
+    expect(code(() => registry.prepare({ type: FRAMEWORK_EVENTS.watchCorrected, payload: { channel: CH, entries: [{ pid: P1, sec: -60 }] } }))).toBe('reason_required');
+    expect(code(() => registry.prepare({ type: FRAMEWORK_EVENTS.watchCorrected, payload: { channel: CH, entries: [{ pid: P1, sec: 0 }] }, reason: 'x' }))).toBe('invalid_payload');
+    expect(code(() => registry.prepare({ type: SERVICE_EVENT_TYPES.boostStarted, payload: { factor: 11, until: AT.toISOString() } }))).toBe('invalid_payload');
+    expect(registry.get(SERVICE_EVENT_TYPES.boostEnded).reversal).toEqual({ kind: 'none', why: 'Ein beendeter Boost bleibt beendet. Starte einen neuen Boost.' });
+    expect(registry.get(SERVICE_EVENT_TYPES.unregisteredPurged).reversal).toEqual({ kind: 'none', why: 'DSGVO-Löschung. Die Zuordnung ist entfernt.' });
+  });
+
+  it('watch_credited inverse is a watch_corrected with negated effective seconds', () => {
+    const base = reduce([created(1, 'watchtime')]);
+    const wc = registry.get(FRAMEWORK_EVENTS.watchCredited).reversal;
+    const cc = registry.get(FRAMEWORK_EVENTS.chatCredited).reversal;
+    const co = registry.get(FRAMEWORK_EVENTS.watchCorrected).reversal;
+    if (wc.kind !== 'compensate' || cc.kind !== 'compensate' || co.kind !== 'compensate') throw new Error('compensate erwartet');
+    expect(wc.inverse(credited(2, [{ pid: P1, sec: 60 }, { pid: P2, sec: 60 }], CH, 2), base)).toEqual({
+      type: FRAMEWORK_EVENTS.watchCorrected,
+      payload: { channel: CH, entries: [{ pid: P1, sec: -120 }, { pid: P2, sec: -120 }] },
+    });
+    expect(cc.inverse(chatCredited(3, [{ pid: P1, sec: 2, lastAt: AT.toISOString() }], CH, 3), base)).toEqual({
+      type: FRAMEWORK_EVENTS.watchCorrected,
+      payload: { channel: CH, entries: [{ pid: P1, sec: -6 }] },
+    });
+    expect(co.inverse(rec(4, FRAMEWORK_EVENTS.watchCorrected, { channel: CH, entries: [{ pid: P1, sec: -120 }] }), base)).toEqual({
+      type: FRAMEWORK_EVENTS.watchCorrected,
+      payload: { channel: CH, entries: [{ pid: P1, sec: 120 }] },
+    });
+  });
+
+  it('boost_started inverse only while that boost is active', () => {
+    const until = '2026-10-28T12:10:00.000Z';
+    const target = rec(3, SERVICE_EVENT_TYPES.boostStarted, { factor: 3, until });
+    const s = reduce([created(), status(2, 'draft', 'open'), target]);
+    const bs = registry.get(SERVICE_EVENT_TYPES.boostStarted).reversal;
+    if (bs.kind !== 'compensate') throw new Error('compensate erwartet');
+    expect(bs.inverse(target, s)).toEqual({ type: SERVICE_EVENT_TYPES.boostEnded, payload: {} });
+    const gone = bs.inverse(target, { ...s, boost: null });
+    expect(isRejection(gone) && gone.code).toBe('boost_not_active');
+    expect(isRejection(gone) && gone.message).toBe('Dieser Boost läuft nicht mehr.');
+    const other = bs.inverse(target, { ...s, boost: { ...s.boost!, eventId: '9' } });
+    expect(isRejection(other) && other.code).toBe('boost_not_active');
   });
 
   it('status_changed inverse only for the latest transition', () => {

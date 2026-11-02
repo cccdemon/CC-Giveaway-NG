@@ -9,6 +9,8 @@ import type { KernelRegistry } from '../kernel-registry.js';
 import { checkLegal } from '../legal.js';
 import { makeRevertHandler, type RevertCommand, type RevertPrepared } from '../revert.js';
 import { GIVEAWAY_NOT_FOUND, INVALID_ID, UUID_RE, authorizeControl, type GiveawayAuthorizer } from './authorize.js';
+import { checkGateConfig, type GateConfig } from './gates.js';
+import { KEYWORD_RE, PURGE_DAYS_MAX, PURGE_DAYS_MIN, SERVICE_DEFAULTS, chatBonusSchema, countingSchema, type ChatBonusSettings } from './services.js';
 import {
   GIVEAWAY_EVENTS,
   TRANSITIONS,
@@ -100,15 +102,27 @@ function checkSettings(kernel: AnyKernel, s: GiveawaySettings): GiveawaySettings
     if (isRejection(legal)) return legal;
     s = { ...s, legal };
   }
+  if (!countingSchema.safeParse(s.counting).success) return reject('invalid_counting', 'Wähle die Zählweise ab Anmeldung oder ab erstem Erscheinen.');
+  if (!Number.isInteger(s.purgeDays) || s.purgeDays < PURGE_DAYS_MIN || s.purgeDays > PURGE_DAYS_MAX) {
+    return reject('invalid_purge_days', 'Die Löschfrist muss zwischen 1 und 90 Tagen liegen.');
+  }
+  if (s.keyword !== null && (typeof s.keyword !== 'string' || !KEYWORD_RE.test(s.keyword))) {
+    return reject('invalid_keyword', 'Das Keyword ist ein Wort mit 2 bis 32 Zeichen ohne Leerzeichen.');
+  }
+  if (!chatBonusSchema.safeParse(s.chatBonus).success) return reject('invalid_chat_bonus', 'Die Chat-Bonus-Regeln sind ungültig.');
   if (!Array.isArray(s.gates)) return INVALID_GATE();
+  const gates: GateConfig[] = [];
   for (const g of s.gates as unknown[]) {
     if (typeof g !== 'object' || g === null || Array.isArray(g)) return INVALID_GATE();
     const id = (g as { id?: unknown }).id;
     if (typeof id !== 'string' || !(kernel.supportedGates as readonly string[]).includes(id)) {
       return reject('gate_unsupported', `Die Bedingung ${String(id)} gibt es für diesen Kern nicht.`);
     }
+    const checked = checkGateConfig(g, s.channels);
+    if (isRejection(checked)) return checked;
+    gates.push(checked);
   }
-  return { ...s, config: config.value as Record<string, unknown> };
+  return { ...s, config: config.value as Record<string, unknown>, gates };
 }
 
 function validIds(cmd: { giveawayId: unknown; teamId: unknown }): boolean {
@@ -139,6 +153,10 @@ export function createGiveawayHandler(d: GiveawayDeps): CommandHandler<CreateGiv
         claimDays: s.claimDays ?? 14,
         gates: s.gates ?? [],
         legal: s.legal ?? null,
+        counting: s.counting ?? SERVICE_DEFAULTS.counting,
+        purgeDays: s.purgeDays ?? SERVICE_DEFAULTS.purgeDays,
+        keyword: s.keyword ?? SERVICE_DEFAULTS.keyword,
+        chatBonus: s.chatBonus ?? SERVICE_DEFAULTS.chatBonus,
       });
       if (isRejection(settings)) return settings;
       return [
@@ -196,6 +214,11 @@ export function changeSettingsHandler(d: GiveawayDeps): CommandHandler<ChangeSet
         claimDays: s.claimDays ?? before.claimDays,
         gates: s.gates ?? before.gates,
         legal: s.legal === undefined ? before.legal : s.legal,
+        counting: s.counting ?? before.counting,
+        purgeDays: s.purgeDays ?? before.purgeDays,
+        keyword: s.keyword === undefined ? before.keyword : s.keyword,
+        // Teilangaben des Chat-Bonus behalten die übrigen Werte (Spec 6.2: Werte bleiben beim Abschalten).
+        chatBonus: s.chatBonus === undefined ? before.chatBonus : ({ ...before.chatBonus, ...(s.chatBonus as Partial<ChatBonusSettings>) } as ChatBonusSettings),
       });
       if (isRejection(after)) return after;
       if (canonicalJson(after) === canonicalJson(before)) return [];

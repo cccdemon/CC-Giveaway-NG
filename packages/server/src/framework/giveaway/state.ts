@@ -1,20 +1,19 @@
 // Zustand des Stroms giveaway:<id>. Rahmen-Felder hier, Kern-Zustand über kernel.reduce (F7). Rein und unveränderlich.
-import { FRAMEWORK_EVENTS, type GateId, type KernelEvent, type Pid } from '../../kernel-api/index.js';
+import { FRAMEWORK_EVENTS, SERVICE_EVENTS, type CreditedPayload, type KernelEvent, type Pid } from '../../kernel-api/index.js';
 import type { EventRecord, StreamId } from '../../journal/types.js';
 import type { StreamReducer } from '../command-bus.js';
 import type { KernelRegistry } from '../kernel-registry.js';
 import type { FrozenLegal, LegalTexts } from '../legal.js';
 import { EVENT_VOIDED } from '../revert.js';
+import type { GateConfig } from './gates.js';
+import { SERVICE_DEFAULTS, SERVICE_EVENT_TYPES, type BoostState, type ServiceSettings } from './services.js';
+
+export type { GateConfig } from './gates.js';
 
 export type GiveawayStatus = 'draft' | 'open' | 'paused' | 'closed' | 'drawn' | 'completed' | 'cancelled';
 export type WinnerStatus = 'pending' | 'reported' | 'shipped' | 'done' | 'forfeited';
 
-export interface GateConfig {
-  id: GateId;
-  [k: string]: unknown;
-}
-
-export interface GiveawaySettings {
+export interface GiveawaySettings extends ServiceSettings {
   config: Record<string, unknown>;
   prize: string;
   sponsor: string | null;
@@ -47,6 +46,16 @@ export interface GiveawayState {
   /** Beim Öffnen eingefrorene Rechtstexte und das Ereignis dazu. */
   legal: FrozenLegal | null;
   legalEventId: string | null;
+  /** Wer je eine Gutschrift bekam, mit erstem Zeitpunkt und Kanälen (Anwesenheitsbedingung, Löschfrist). */
+  seen: Record<Pid, { since: string; channels: Pid[] }>;
+  /** Kanal → letzte Minute mit gebuchter Zuschauzeit (gegen doppelte Bündel). */
+  watchMinutes: Record<Pid, string>;
+  /** pid → Zeitpunkt der letzten belohnten Chatnachricht (Cooldown). */
+  chatLast: Record<Pid, string>;
+  boost: BoostState | null;
+  /** Zeitpunkt des letzten Übergangs nach Geschlossen oder Abgebrochen, null nach Öffnen. */
+  closedAt: string | null;
+  purgedAt: string | null;
   kernelState: unknown;
 }
 
@@ -87,12 +96,20 @@ interface CreatedPayload {
   settings: GiveawaySettings;
 }
 
-/** Ereignisse vor Teilprojekt 3 haben kein legal. Der Zustand hat es immer. */
-function withLegal(s: GiveawaySettings): GiveawaySettings {
-  return { ...s, legal: s.legal ?? null };
+function markSeen(s: GiveawayState, channel: Pid, pids: Pid[], at: string): GiveawayState['seen'] {
+  const seen = { ...s.seen };
+  for (const pid of pids) {
+    const old = seen[pid];
+    if (!old) seen[pid] = { since: at, channels: [channel] };
+    else if (!old.channels.includes(channel)) seen[pid] = { ...old, channels: [...old.channels, channel] };
+  }
+  return seen;
 }
 
+const later = (a: string | undefined, b: string): string => (a !== undefined && Date.parse(a) > Date.parse(b) ? a : b);
+
 function applyFramework(kernels: KernelRegistry, s: GiveawayState, e: EventRecord): GiveawayState {
+  const at = e.createdAt.toISOString();
   switch (e.type) {
     case GIVEAWAY_EVENTS.created: {
       const p = e.payload as CreatedPayload;
@@ -103,25 +120,50 @@ function applyFramework(kernels: KernelRegistry, s: GiveawayState, e: EventRecor
         teamId: p.teamId,
         kernelId: p.kernelId,
         kernelVersionAtCreate: p.kernelVersion,
-        settings: withLegal(p.settings),
+        settings: p.settings,
         status: 'draft',
         kernelState: kernel.initialState(p.settings.config),
       };
     }
-    case GIVEAWAY_EVENTS.statusChanged:
-      return { ...s, status: (e.payload as { to: GiveawayStatus }).to };
+    case GIVEAWAY_EVENTS.statusChanged: {
+      const to = (e.payload as { to: GiveawayStatus }).to;
+      const closedAt = to === 'closed' || to === 'cancelled' ? at : to === 'open' ? null : s.closedAt;
+      return { ...s, status: to, closedAt };
+    }
     case GIVEAWAY_EVENTS.settingsChanged:
-      return { ...s, settings: withLegal((e.payload as { after: GiveawaySettings }).after) };
+      return { ...s, settings: (e.payload as { after: GiveawaySettings }).after };
     case GIVEAWAY_EVENTS.legalFrozen:
       return { ...s, legal: e.payload as FrozenLegal, legalEventId: e.id };
     case GIVEAWAY_EVENTS.registered: {
       const { pid } = e.payload as { pid: Pid };
-      return { ...s, registered: { ...s.registered, [pid]: { since: e.createdAt.toISOString(), eventId: e.id, legalEventId: s.legalEventId } } };
+      return { ...s, registered: { ...s.registered, [pid]: { since: at, eventId: e.id, legalEventId: s.legalEventId } } };
     }
     case GIVEAWAY_EVENTS.withdrawn: {
       const { pid } = e.payload as { pid: Pid };
       return { ...s, registered: Object.fromEntries(Object.entries(s.registered).filter(([k]) => k !== pid)) };
     }
+    case FRAMEWORK_EVENTS.watchCredited: {
+      const p = e.payload as CreditedPayload;
+      return {
+        ...s,
+        seen: markSeen(s, p.channel, p.entries.map((x) => x.pid), at),
+        watchMinutes: { ...s.watchMinutes, [p.channel]: later(s.watchMinutes[p.channel], p.minute) },
+      };
+    }
+    case FRAMEWORK_EVENTS.chatCredited: {
+      const p = e.payload as CreditedPayload & { entries: { pid: Pid; lastAt: string }[] };
+      const chatLast = { ...s.chatLast };
+      for (const x of p.entries) chatLast[x.pid] = later(chatLast[x.pid], x.lastAt);
+      return { ...s, seen: markSeen(s, p.channel, p.entries.map((x) => x.pid), at), chatLast };
+    }
+    case SERVICE_EVENT_TYPES.boostStarted: {
+      const { factor, until } = e.payload as { factor: number; until: string };
+      return { ...s, boost: { factor, since: at, until, eventId: e.id } };
+    }
+    case SERVICE_EVENT_TYPES.boostEnded:
+      return { ...s, boost: null };
+    case SERVICE_EVENT_TYPES.unregisteredPurged:
+      return { ...s, purgedAt: at };
     case GIVEAWAY_EVENTS.drawn: {
       const { winners, excluded } = e.payload as { winners: Pid[]; excluded: Pid[] };
       const next = { ...s.winners };
@@ -151,14 +193,17 @@ function applyFramework(kernels: KernelRegistry, s: GiveawayState, e: EventRecor
   }
 }
 
+/** Anmeldung bekommt jeder Kern, Dienst-Ereignisse nur Kerne mit dem Dienst, eigene Typen nur der Kern selbst (§4, §6.1). */
+function kernelSees(kernel: ReturnType<KernelRegistry['get']>, type: string): boolean {
+  if (type === FRAMEWORK_EVENTS.registered || type === FRAMEWORK_EVENTS.withdrawn) return true;
+  if (kernel.usesServices.some((service) => SERVICE_EVENTS[service].includes(type))) return true;
+  return kernel.events.some((d) => d.type === type);
+}
+
 function applyKernel(kernels: KernelRegistry, s: GiveawayState, e: EventRecord): GiveawayState {
   if (!s.exists) return s;
   const kernel = kernels.get(s.kernelId);
-  const relevant =
-    e.type === FRAMEWORK_EVENTS.registered ||
-    e.type === FRAMEWORK_EVENTS.withdrawn ||
-    kernel.events.some((d) => d.type === e.type);
-  if (!relevant) return s;
+  if (!kernelSees(kernel, e.type)) return s;
   return { ...s, kernelState: kernel.reduce(s.kernelState, toKernelEvent(e), s.settings.config) };
 }
 
@@ -171,13 +216,19 @@ export function makeGiveawayReducer(kernels: KernelRegistry): StreamReducer<Give
       teamId: '',
       kernelId: '',
       kernelVersionAtCreate: 0,
-      settings: { config: {}, prize: '', sponsor: null, channels: [], winnersCount: 1, claimDays: 14, gates: [], legal: null },
+      settings: { config: {}, prize: '', sponsor: null, channels: [], winnersCount: 1, claimDays: 14, gates: [], legal: null, ...SERVICE_DEFAULTS },
       status: 'draft',
       registered: {},
       draws: [],
       winners: {},
       legal: null,
       legalEventId: null,
+      seen: {},
+      watchMinutes: {},
+      chatLast: {},
+      boost: null,
+      closedAt: null,
+      purgedAt: null,
       kernelState: null,
     }),
     apply: (state, e) => applyKernel(kernels, applyFramework(kernels, state, e), e),
