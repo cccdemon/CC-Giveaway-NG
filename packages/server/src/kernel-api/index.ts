@@ -26,7 +26,45 @@ export type ConfigField =
 
 export type ConfigSchema<C> = { readonly [K in keyof C]: ConfigField };
 
-export const FRAMEWORK_EVENTS = { registered: 'participant_registered', withdrawn: 'participant_withdrawn' } as const;
+/** Rahmen-Ereignisse, die ein Kern per reduce bekommt. Anmeldung bekommt jeder Kern, die anderen nur mit dem Dienst. */
+export const FRAMEWORK_EVENTS = {
+  registered: 'participant_registered',
+  withdrawn: 'participant_withdrawn',
+  watchCredited: 'watch_credited',
+  chatCredited: 'chat_credited',
+  watchCorrected: 'watch_corrected',
+} as const;
+
+/** Welche Rahmen-Ereignisse ein Dienst erzeugt (NEW_DESIGN.md 6). Der Rahmen reicht sie an Kerne mit diesem Dienst weiter. */
+export const SERVICE_EVENTS: Record<ServiceId, readonly string[]> = {
+  watchtime: [FRAMEWORK_EVENTS.watchCredited, FRAMEWORK_EVENTS.watchCorrected],
+  chatBonus: [FRAMEWORK_EVENTS.chatCredited],
+  boost: [],
+  registration: [FRAMEWORK_EVENTS.registered, FRAMEWORK_EVENTS.withdrawn],
+};
+
+/** Payload von watch_credited und chat_credited (chat_credited trägt je Eintrag zusätzlich lastAt). sec ist Rohzeit, der Kern multipliziert mit factor. */
+export interface CreditedPayload {
+  minute: string;
+  channel: Pid;
+  factor: number;
+  entries: { pid: Pid; sec: number }[];
+}
+
+/** Payload von watch_corrected: wirksame Sekunden, positiv oder negativ. */
+export interface CorrectedPayload {
+  channel: Pid;
+  entries: { pid: Pid; sec: number }[];
+}
+
+/** Ganze Minuten als Text: „0 min“, „37 min“, „1 h 23 min“, „100 h“. Negatives zählt als 0. */
+export function formatDuration(sec: number): string {
+  const minutes = Math.floor(Math.max(0, sec) / 60);
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  if (h === 0) return `${m} min`;
+  return m === 0 ? `${h} h` : `${h} h ${m} min`;
+}
 
 export interface KernelEvent {
   id: string;

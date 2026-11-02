@@ -1,8 +1,9 @@
 import type { AnyKernel } from '../kernel-api/index.js';
 import { JournalError } from '../journal/types.js';
 import { instantKernel } from '../kernels/instant/index.js';
+import { watchtimeKernel } from '../kernels/watchtime/index.js';
 
-export const FRAMEWORK_REDUCER_VERSION = 4; // 2: DrawRecord.excluded, 3: registered[pid].eventId, 4: legal, legalEventId
+export const FRAMEWORK_REDUCER_VERSION = 5; // 2: DrawRecord.excluded, 3: registered[pid].eventId, 4: legal, legalEventId, 5: Dienste (seen, boost, …)
 
 /** FNV-1a 32 Bit über `${frameworkVersion}` + je Kern `${id}@${version}` (nach id sortiert), & 0x7fffffff (F4). Rein. */
 export function versionStamp(frameworkVersion: number, kernels: readonly { id: string; version: number }[]): number {
@@ -30,6 +31,9 @@ export class KernelRegistry {
     }
     const seen = new Set<string>();
     for (const c of k.commands) {
+      if (c.type.includes(':')) {
+        throw new Error(`Der Befehlstyp ${c.type} darf keinen Doppelpunkt enthalten. Der ist für Rahmen-Zeitgeber reserviert.`);
+      }
       if (seen.has(c.type)) throw new Error(`Befehl ${c.type} steht im Kern ${k.id} doppelt.`);
       seen.add(c.type);
     }
@@ -58,5 +62,6 @@ export class KernelRegistry {
 export function defaultKernels(): KernelRegistry {
   const r = new KernelRegistry();
   r.register(instantKernel);
+  r.register(watchtimeKernel);
   return r;
 }

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { AnyKernel } from '../src/kernel-api/index.js';
 import { FRAMEWORK_REDUCER_VERSION, KernelRegistry, defaultKernels, versionStamp } from '../src/framework/kernel-registry.js';
 import { instantKernel } from '../src/kernels/instant/index.js';
+import { watchtimeKernel } from '../src/kernels/watchtime/index.js';
 import { JournalError } from '../src/journal/types.js';
 
 function fake(id: string, eventType: string, commands: string[] = []): AnyKernel {
@@ -14,12 +15,19 @@ function fake(id: string, eventType: string, commands: string[] = []): AnyKernel
 }
 
 describe('KernelRegistry', () => {
-  it('defaultKernels kennt instant', () => {
+  it('defaultKernels has instant and watchtime', () => {
     const r = defaultKernels();
     expect(r.get('instant').id).toBe('instant');
+    expect(r.get('watchtime').id).toBe('watchtime');
     expect(r.has('instant')).toBe(true);
     expect(r.has('nope')).toBe(false);
-    expect(r.list().map((x) => x.id)).toEqual(['instant']);
+    expect(r.list().map((x) => x.id)).toEqual(['instant', 'watchtime']);
+  });
+
+  it('refuses a kernel command type with a colon', () => {
+    const r = new KernelRegistry();
+    expect(() => r.register(fake('baz', 'baz_x', ['framework:stop_boost']))).toThrow(/Doppelpunkt/);
+    expect(r.has('baz')).toBe(false);
   });
 
   it('get unknown throws unknown_kernel', () => {
@@ -63,6 +71,7 @@ describe('KernelRegistry', () => {
   });
 
   it('defaultKernels versionStamp', () => {
-    expect(defaultKernels().versionStamp()).toBe(versionStamp(FRAMEWORK_REDUCER_VERSION, [instantKernel]));
+    expect(defaultKernels().versionStamp()).toBe(versionStamp(FRAMEWORK_REDUCER_VERSION, [instantKernel, watchtimeKernel]));
+    expect(FRAMEWORK_REDUCER_VERSION).toBe(5);
   });
 });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { FRAMEWORK_EVENTS, isRejection, reject, type Kernel } from '../src/kernel-api/index.js';
+import { FRAMEWORK_EVENTS, SERVICE_EVENTS, formatDuration, isRejection, reject, type Kernel } from '../src/kernel-api/index.js';
 
 describe('kernel-api', () => {
   it('reject baut eine Rejection, isRejection erkennt sie', () => {
@@ -11,7 +11,31 @@ describe('kernel-api', () => {
   });
 
   it('FRAMEWORK_EVENTS ist exakt festgelegt', () => {
-    expect(FRAMEWORK_EVENTS).toEqual({ registered: 'participant_registered', withdrawn: 'participant_withdrawn' });
+    expect(FRAMEWORK_EVENTS).toEqual({
+      registered: 'participant_registered',
+      withdrawn: 'participant_withdrawn',
+      watchCredited: 'watch_credited',
+      chatCredited: 'chat_credited',
+      watchCorrected: 'watch_corrected',
+    });
+  });
+
+  it('SERVICE_EVENTS names the framework events per service', () => {
+    expect(SERVICE_EVENTS).toEqual({
+      watchtime: ['watch_credited', 'watch_corrected'],
+      chatBonus: ['chat_credited'],
+      boost: [],
+      registration: ['participant_registered', 'participant_withdrawn'],
+    });
+  });
+
+  it('formatDuration renders minutes and hours', () => {
+    expect(formatDuration(0)).toBe('0 min');
+    expect(formatDuration(2220)).toBe('37 min');
+    expect(formatDuration(4980)).toBe('1 h 23 min');
+    expect(formatDuration(360000)).toBe('100 h');
+    expect(formatDuration(-5)).toBe('0 min');
+    expect(formatDuration(59)).toBe('0 min');
   });
 
   it('Kernel-Literal ist typisiert', () => {
