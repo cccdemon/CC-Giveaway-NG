@@ -73,7 +73,7 @@ fachlichen Begriffe (Giveaway, Kern, Topf, Chance …) stehen in
 | **Bedingung** | Follow (alle Kanäle, mindestens N, ein Kanal), Mindestalter des Twitch-Kontos, Mindestalter des Follows, Anwesenheit in N Kanälen. Verbindlich prüft sie die App bei der Ziehung live bei Twitch, vor der Sperre. Antwortet Twitch nicht, bricht die Ziehung ab, ohne Ereignis. |
 | **Zählweise** | Je Giveaway: „ab Anmeldung“ (nur angemeldete Teilnehmer sammeln) oder „ab erstem Erscheinen“ (jeder Anwesende bekommt eine `pid` und sammelt, gewinnen können nur Angemeldete). |
 | **Keyword** | Ein Wort im Chat (z. B. `!werwolf`), mit dem sich ein Zuschauer anmeldet. Erstes Wort der Nachricht, Groß- und Kleinschreibung egal. Dieselben Regeln wie der Knopf im Portal. |
-| **Löschfrist** | Unangemeldete `pid`s der Zählweise „ab erstem Erscheinen“ verlieren ihre Zuordnung Schließen + 7 Tage (einstellbar) nach dem Giveaway: Befehl `purge_unregistered`, Ereignis `unregistered_purged`, die `identities`-Zeile fällt. Nie, wenn die Person ein Konto hat oder in einem anderen laufenden Giveaway steht. |
+| **Löschfrist** | Unangemeldete `pid`s der Zählweise „ab erstem Erscheinen“ verlieren ihre Zuordnung Schließen + 7 Tage (einstellbar) nach dem Giveaway: Befehl `purge_unregistered`, Ereignis `unregistered_purged`, die `identities`-Zeile fällt. Nie, wenn die Person ein Konto hat, irgendwo angemeldet oder Gewinner ist oder in einem anderen laufenden Giveaway gesehen wurde. |
 | **Teilprojekt** | Ein Abschnitt des Neubaus mit eigenem Umsetzungsplan (NEW_DESIGN.md, Abschnitt 14). Teilprojekte 1 bis 5 (Fundament, Kern-Vertrag + Kern B, Konten + Identität, Ingest, Rahmen-Dienste + Kern A) sind fertig. |
 
 ## Prozesse
@@ -96,7 +96,7 @@ Drei Prozesse aus `packages/server`:
   - `INGEST_ADAPTER=twitch|simulator` (Default `twitch`). Der Simulator braucht keine Twitch-Daten: `INGEST_SIM_VIEWERS` (Default 20), `INGEST_SIM_SEED` (Default 1).
   - Mehrere Worker: `INGEST_WORKERS` (Default 1) und je Prozess `INGEST_WORKER_INDEX` (0 bis Workers − 1). Worker 0 legt das Conduit an, die anderen warten darauf.
   - Alle 30 s liest er das Kanalverzeichnis: verbundene Kanäle mit gültigem Token. Kanäle in einem offenen Giveaway bekommen Chat, Follow und Anwesenheit je Minute, alle anderen nur Live-Status und Zuschauerzahl.
-  - Je Bündel ein Befehl `apply_signals` je offenem Giveaway des Kanals. Er prüft Rechte, Zustand und Kanal, löst Twitch-IDs zu `pid`s auf (legt sie in der Zählweise „ab erstem Erscheinen“ und für Keyword-Schreiber an) und schreibt Keyword-Anmeldung, `watch_credited` und `chat_credited`. Signale für Kanäle, die nicht live sind oder keine Signale liefern, bringen keinen Chat-Bonus.
+  - Je Bündel ein Befehl `apply_signals` je offenem Giveaway des Kanals. Er prüft Rechte, Zustand und Kanal, löst Twitch-IDs zu `pid`s auf (legt sie nur für Unbekannte an, die in diesem Bündel eine Anmeldung oder Gutschrift bekommen) und schreibt Keyword-Anmeldung, `watch_credited` und `chat_credited`. Signale für Kanäle, die nicht live sind oder keine Signale liefern, bringen keinen Chat-Bonus.
   - Twitch-Fehler: drei Versuche mit 1 s, 2 s, 4 s. Danach steht `twitch_error` am Kanal, der nächste Minutenlauf versucht es wieder. Ein abgelehnter Token-Refresh setzt das Token auf `invalid`, der Kanal wird rot, bis der Streamer ihn neu verbindet.
 
 ### Bot einrichten

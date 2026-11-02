@@ -74,6 +74,24 @@ describe('purge_unregistered', () => {
     expect(await findIdentity(s.pool, pg)).toBeNull();
   });
 
+  it('keeps a pid that is registered or a winner in a giveaway that is no longer running', async () => {
+    const s = await setup();
+    await createOpen(s.rt, firstSeen(GID));
+    // BOB (P3) hat kein Konto, gewinnt aber Giveaway 2 (Kern B, Zustand Gezogen).
+    await createOpen(s.rt, { giveawayId: GID2, settings: { prize: 'Key', channels: [P1] } });
+    await must(s.rt, s.rt.handlers.kernelCommand, { giveawayId: GID2, command: { type: 'open_window', args: {} } });
+    await must(s.rt, s.rt.handlers.register, { giveawayId: GID2, pid: P3 }, { actor: userOf(P3) });
+    await must(s.rt, s.rt.handlers.close, { giveawayId: GID2 });
+    await must(s.rt, s.rt.handlers.draw, { giveawayId: GID2 });
+    expect((await state(s.rt, GID2)).status).toBe('drawn');
+    await must(s.rt, s.rt.handlers.applySignals, presence(GID, [BOB, GHOST]), INGEST);
+    const pg = (await findPidByTwitchId(s.pool, GHOST.id))!;
+    await must(s.rt, s.rt.handlers.close, purge());
+    const events = await must(s.rt, s.rt.handlers.purgeUnregistered, purge(), { ...SCHEDULER, now: day(7) });
+    expect(events[0]!.payload).toEqual({ pids: [pg] });
+    expect(await findIdentity(s.pool, P3)).not.toBeNull();
+  });
+
   it('rejects before the deadline, before closing and a second time, streamer may run it too', async () => {
     const s = await setup();
     await createOpen(s.rt, firstSeen(GID));

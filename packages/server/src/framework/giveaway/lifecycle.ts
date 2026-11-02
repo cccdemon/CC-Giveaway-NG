@@ -103,6 +103,9 @@ function checkSettings(kernel: AnyKernel, s: GiveawaySettings): GiveawaySettings
     s = { ...s, legal };
   }
   if (!countingSchema.safeParse(s.counting).success) return reject('invalid_counting', 'Wähle die Zählweise ab Anmeldung oder ab erstem Erscheinen.');
+  if (s.counting === 'first_seen' && !kernel.usesServices.includes('watchtime')) {
+    return reject('invalid_counting', 'Die Zählweise ab erstem Erscheinen gibt es nur mit Zuschauzeit.');
+  }
   if (!Number.isInteger(s.purgeDays) || s.purgeDays < PURGE_DAYS_MIN || s.purgeDays > PURGE_DAYS_MAX) {
     return reject('invalid_purge_days', 'Die Löschfrist muss zwischen 1 und 90 Tagen liegen.');
   }

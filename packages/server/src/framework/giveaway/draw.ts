@@ -135,10 +135,15 @@ function checkGates(d: DrawDeps, status: GiveawayStatus) {
     if (!state.exists || state.status !== status) return { kind: 'skip' };
     const pids = kernelPool(d, state).map((p) => p.pid);
     const seen = Object.fromEntries(Object.entries(state.seen).map(([pid, s]) => [pid, s.channels]));
+    // Unangemeldete fallen ohne Twitch-Aufruf heraus (Entscheidung 12): bei „ab erstem Erscheinen“ sind sie oft die Mehrheit.
+    const needsRegistration = d.kernels.get(state.kernelId).usesServices.includes('registration');
+    const isRegistered = (pid: Pid): boolean => !needsRegistration || pid in state.registered;
     try {
-      const results = await d.gates.check(db, { channels: state.settings.channels, gates: state.settings.gates, pids, seen, now: ctx.now });
+      const results = await d.gates.check(db, { channels: state.settings.channels, gates: state.settings.gates, pids: pids.filter(isRegistered), seen, now: ctx.now });
       // Genau ein Ergebnis je pid des Topfs: fremde und doppelte Ergebnisse fallen weg, fehlende gelten als nicht erfüllt.
-      const gates = pids.map((pid) => results.find((r) => r.pid === pid) ?? { pid, ok: false, reasons: ['no_result'] });
+      const gates = pids.map((pid) =>
+        isRegistered(pid) ? (results.find((r) => r.pid === pid) ?? { pid, ok: false, reasons: ['no_result'] }) : { pid, ok: false, reasons: ['not_registered'] },
+      );
       return { kind: 'ready', pids: [...pids].sort(), gates };
     } catch (e) {
       if (e instanceof GateCheckError) return { kind: 'failed', code: e.code, message: e.message };
@@ -159,7 +164,7 @@ function comparePool(d: DrawDeps) {
 /** Anmeldung als eingebaute Bedingung: Nutzt der Kern den Dienst registration, fällt jeder Unangemeldete heraus (Glossar: Teilnehmer). */
 function withRegistration(d: DrawDeps, state: GiveawayState, gates: GateResult[]): GateResult[] {
   if (!d.kernels.get(state.kernelId).usesServices.includes('registration')) return gates;
-  return gates.map((g) => (g.pid in state.registered ? g : { pid: g.pid, ok: false, reasons: ['not_registered', ...g.reasons] }));
+  return gates.map((g) => (g.pid in state.registered ? g : { pid: g.pid, ok: false, reasons: ['not_registered', ...g.reasons.filter((r) => r !== 'not_registered')] }));
 }
 
 /** Kern-Topf ohne Einträge, die eine Bedingung verfehlen, in `without` stehen oder kein positives Gewicht haben. */

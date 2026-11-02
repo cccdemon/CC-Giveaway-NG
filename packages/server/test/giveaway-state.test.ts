@@ -159,6 +159,21 @@ describe('giveaway reducer', () => {
     expect((s.kernelState as WatchtimeState).sec).toEqual({ [P1]: { [CH]: 60, [P3]: 60 }, [P2]: { [CH]: 2 } });
   });
 
+  it('a credit for an already seen pid and channel keeps the seen object identical', () => {
+    const s1 = reduce([created(1, 'watchtime'), status(2, 'draft', 'open'), credited(3, [{ pid: P1, sec: 60 }])]);
+    const s2 = reducer.apply(s1, credited(4, [{ pid: P1, sec: 60 }]));
+    expect(s2.seen).toBe(s1.seen);
+    const s3 = reducer.apply(s2, credited(5, [{ pid: P2, sec: 60 }]));
+    expect(s3.seen).not.toBe(s2.seen);
+  });
+
+  it('reopening after a purge clears purgedAt so new unregistered pids are purged again', () => {
+    const s = reduce([created(), status(2, 'draft', 'open'), status(3, 'open', 'closed'), rec(4, SERVICE_EVENT_TYPES.unregisteredPurged, { pids: [] })]);
+    expect(s.purgedAt).toBe(AT.toISOString());
+    expect(reducer.apply(s, status(5, 'closed', 'open')).purgedAt).toBeNull();
+    expect(reducer.apply(s, status(5, 'closed', 'cancelled')).purgedAt).toBe(AT.toISOString());
+  });
+
   it('boost_started sets boost with eventId, boost_ended clears it, boostFactor respects until and since', () => {
     const until = '2026-10-28T12:10:00.000Z';
     const s = reduce([created(), status(2, 'draft', 'open'), rec(3, SERVICE_EVENT_TYPES.boostStarted, { factor: 3, until })]);

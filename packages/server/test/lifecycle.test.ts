@@ -55,6 +55,7 @@ describe('Lebenszyklus', () => {
     const { rt } = await setup();
     const c = (settings: Record<string, unknown>, over: Record<string, unknown> = {}) => code(run(rt, rt.handlers.create, createCmd(over, settings)));
     expect(await c({ counting: 'always' })).toBe('invalid_counting');
+    expect(await c({ counting: 'first_seen' })).toBe('invalid_counting');
     expect(await c({ purgeDays: 0 })).toBe('invalid_purge_days');
     expect(await c({ purgeDays: 91 })).toBe('invalid_purge_days');
     expect(await c({ keyword: 'zwei wörter' })).toBe('invalid_keyword');
@@ -76,7 +77,7 @@ describe('Lebenszyklus', () => {
 
   it('change_settings merges chatBonus field by field', async () => {
     const { rt } = await setup();
-    await createOpen(rt);
+    await createOpen(rt, { kernelId: 'watchtime', settings: { prize: 'Key', channels: [P1], config: {} } });
     await must(rt, rt.handlers.changeSettings, { giveawayId: GID, settings: { chatBonus: { enabled: false } } as never });
     expect((await state(rt)).settings.chatBonus).toEqual({ enabled: false, sec: 2, minWords: 4, cooldownSec: 10 });
     await must(rt, rt.handlers.changeSettings, { giveawayId: GID, settings: { keyword: '!go', counting: 'first_seen' } });

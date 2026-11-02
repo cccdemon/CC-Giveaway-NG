@@ -127,6 +127,36 @@ describe('apply_signals', () => {
     expect(await must(s.rt, s.rt.handlers.applySignals, signals({ giveawayId: gid2, presence: null, chat: [chatMsg(ALICE, '!go', 1)] }), INGEST)).toEqual([]);
   });
 
+  it('creates no identity when the keyword registration is refused by the kernel or the chat earns nothing', async () => {
+    const s = await setup({ counting: 'registered' });
+    // Kern B ohne offenes Fenster: Keyword vor dem Fenster ist der Normalfall, es entsteht keine pid.
+    const gid2 = '66666666-6666-4666-8666-666666666670';
+    await createOpen(s.rt, { giveawayId: gid2, kernelId: 'instant', settings: { prize: 'Key', channels: [P1], keyword: '!go' } });
+    expect(await must(s.rt, s.rt.handlers.applySignals, signals({ giveawayId: gid2, presence: null, chat: [chatMsg(GHOST, '!go', 1)] }), INGEST)).toEqual([]);
+    expect(s.identities.create).not.toHaveBeenCalled();
+    // „Ab erstem Erscheinen“: ein unbekannter Schreiber ohne Anwesenheit und ohne Bonus (zu kurz) bekommt keine pid.
+    expect(await must(s.rt, s.rt.handlers.applySignals, signals({ presence: [ALICE], chat: [chatMsg(GHOST, 'hi', 2)] }), INGEST)).toEqual([]);
+    await must(s.rt, s.rt.handlers.changeSettings, { giveawayId: GID, settings: { counting: 'first_seen', chatBonus: { enabled: false } } as never });
+    const events = await must(s.rt, s.rt.handlers.applySignals, signals({ presence: [ALICE], chat: [chatMsg(GHOST, 'eins zwei drei vier', 3)] }), INGEST);
+    expect(types(events)).toEqual([FRAMEWORK_EVENTS.watchCredited]);
+    expect(s.identities.create).not.toHaveBeenCalled();
+    // Mit Bonus an bekommt der Schreiber seine pid und den Bonus.
+    await must(s.rt, s.rt.handlers.changeSettings, { giveawayId: GID, settings: { chatBonus: { enabled: true } } as never });
+    const bonus = await must(s.rt, s.rt.handlers.applySignals, signals({ presence: null, chat: [chatMsg(GHOST, 'eins zwei drei vier', 20)] }), INGEST);
+    expect(types(bonus)).toEqual([FRAMEWORK_EVENTS.chatCredited]);
+    expect(s.identities.create.mock.calls[0]![1]).toEqual([GHOST]);
+  });
+
+  it('a kernel without the watchtime or chatBonus service gets no credits and no identities', async () => {
+    const s = await setup({ counting: 'registered' });
+    const gid2 = '66666666-6666-4666-8666-666666666670';
+    await createOpen(s.rt, { giveawayId: gid2, kernelId: 'instant', settings: { prize: 'Key', channels: [P1] } });
+    await must(s.rt, s.rt.handlers.kernelCommand, { giveawayId: gid2, command: { type: 'open_window', args: {} } });
+    await must(s.rt, s.rt.handlers.register, { giveawayId: gid2, pid: P2 }, { actor: userOf(P2) });
+    expect(await must(s.rt, s.rt.handlers.applySignals, signals({ giveawayId: gid2, presence: [ALICE], chat: [chatMsg(ALICE, 'eins zwei drei vier', 1)] }), INGEST)).toEqual([]);
+    expect(s.identities.create).not.toHaveBeenCalled();
+  });
+
   it('a second bundle for the same channel and minute credits no watch time again', async () => {
     const s = await setup();
     await must(s.rt, s.rt.handlers.applySignals, signals({ presence: [ALICE] }), INGEST);

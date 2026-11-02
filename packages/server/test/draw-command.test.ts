@@ -299,6 +299,25 @@ describe('Ziehung', () => {
     });
   });
 
+  it('the gate checker only sees registered pids, unregistered ones are named without Helix', async () => {
+    const ALICE = { id: '12345', login: 'alice', displayName: 'Alice' };
+    const BOB = { id: '67890', login: 'bob', displayName: 'Bob' };
+    const identities: IdentityResolver = {
+      resolve: async (_c, ids) => new Map(ids.map((id) => [id, id === ALICE.id ? P2 : P3])),
+      create: async () => new Map(),
+      touch: async () => {},
+    };
+    const check = vi.fn(async (_db: unknown, input: { pids: string[] }) => input.pids.map(ok));
+    const { rt } = await setup([0], { identities, gates: { check } });
+    await createOpen(rt, { kernelId: 'watchtime', settings: { prize: 'Key', channels: [P1], config: { coinBaseSec: 60 }, counting: 'first_seen', gates: [{ id: 'follow', mode: 'all' }] } });
+    await must(rt, rt.handlers.register, { giveawayId: GID, pid: P3 }, { actor: userOf(P3) });
+    await must(rt, rt.handlers.applySignals, { giveawayId: GID, channel: P1, minute: minuteOf(AT), presence: [ALICE, BOB], chat: [], follows: [] }, { actor: 'system:ingest' });
+    await must(rt, rt.handlers.close, { giveawayId: GID });
+    const [e] = await must(rt, rt.handlers.draw, draw);
+    expect(check.mock.calls[0]![1]).toMatchObject({ pids: [P3] });
+    expect(e!.payload).toMatchObject({ winners: [P3], gates: [{ pid: P2, ok: false, reasons: ['not_registered'] }, ok(P3)] });
+  });
+
   it('noGates refuses to draw with configured gates', async () => {
     const { rt } = await setup([0]);
     await createOpen(rt, { settings: { prize: 'Key', channels: [P1], gates: [{ id: 'follow', mode: 'all' }] } });

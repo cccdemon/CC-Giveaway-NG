@@ -118,6 +118,17 @@ describe('Boost', () => {
     expect(((await state(rt)).kernelState as WatchtimeState).sec).toEqual({ [P2]: { [P1]: 120 } });
   });
 
+  it('start_boost and correct_watch are refused for a kernel without the service', async () => {
+    const { rt } = await setup();
+    const gid2 = '66666666-6666-4666-8666-666666666670';
+    await createOpen(rt, { giveawayId: gid2, kernelId: 'instant', settings: { prize: 'Key', channels: [P1] } });
+    expect(await run(rt, rt.handlers.startBoost, { giveawayId: gid2, factor: 2, durationSec: 60 })).toEqual({
+      ok: false,
+      rejection: { rejected: true, code: 'service_unsupported', message: 'Der Kern Sofortverlosung kennt diesen Dienst nicht.' },
+    });
+    expect(await code(run(rt, rt.handlers.correctWatch, { giveawayId: gid2, channel: P1, pid: P2, sec: 60, reason: 'x' }))).toBe('service_unsupported');
+  });
+
   it('correct_watch rejects after cancel, foreign channel, zero and missing reason', async () => {
     const { rt } = await setup();
     const cmd = { giveawayId: GID, channel: P1, pid: P2, sec: 60, reason: 'Nachtrag' };

@@ -34,6 +34,12 @@ const INVALID_BOOST = (): Rejection => reject('invalid_boost', 'Der Faktor liegt
 
 const inRange = (n: unknown, min: number, max: number): n is number => typeof n === 'number' && Number.isInteger(n) && n >= min && n <= max;
 
+/** Boost und Zeit-Korrektur gibt es nur für Kerne, die den Dienst nutzen (NEW_DESIGN.md 4). */
+function requireService(d: GiveawayDeps, state: GiveawayState, service: 'boost' | 'watchtime'): Rejection | null {
+  const kernel = d.kernels.get(state.kernelId);
+  return kernel.usesServices.includes(service) ? null : reject('service_unsupported', `Der Kern ${kernel.label} kennt diesen Dienst nicht.`);
+}
+
 export function startBoostHandler(d: GiveawayDeps & { activity: ChannelActivity }): CommandHandler<StartBoostCmd, GiveawayState, Set<Pid>> {
   return {
     type: 'start_boost',
@@ -43,6 +49,8 @@ export function startBoostHandler(d: GiveawayDeps & { activity: ChannelActivity 
     prepare: (c, _cmd, ctx, _pre, state) => d.activity.active(c, state.settings.channels, ctx.now),
     decide(state, cmd, ctx, active) {
       if (!state.exists) return GIVEAWAY_NOT_FOUND();
+      const unsupported = requireService(d, state, 'boost');
+      if (unsupported) return unsupported;
       if (state.status !== 'open') return reject('not_open', 'Ein Boost startet nur, solange das Giveaway offen ist.');
       if (!inRange(cmd.factor, BOOST_FACTOR_MIN, BOOST_FACTOR_MAX) || !inRange(cmd.durationSec, BOOST_DURATION_MIN_SEC, BOOST_DURATION_MAX_SEC)) return INVALID_BOOST();
       if (state.boost !== null) return reject('boost_active', 'Ein Boost läuft schon. Stoppe ihn zuerst.');
@@ -77,6 +85,8 @@ export function correctWatchHandler(d: GiveawayDeps): CommandHandler<CorrectWatc
     authorize: authorizeControl(d.auth),
     decide(state, cmd) {
       if (!state.exists) return GIVEAWAY_NOT_FOUND();
+      const unsupported = requireService(d, state, 'watchtime');
+      if (unsupported) return unsupported;
       if (!CORRECTABLE.includes(state.status)) return reject('correction_locked', 'Nach Ziehung oder Abbruch korrigierst du keine Zuschauzeit mehr.');
       if (typeof cmd.pid !== 'string' || !UUID_RE.test(cmd.pid) || typeof cmd.channel !== 'string' || !UUID_RE.test(cmd.channel)) {
         return reject('invalid_id', 'Die ID ist keine gültige UUID.');

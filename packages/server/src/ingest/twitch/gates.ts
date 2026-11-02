@@ -32,7 +32,8 @@ export function helixGateChecker(o: { helix: HelixClient; tokens: ChannelTokenPr
           try {
             return [u.pid, (await o.helix.isFollower(channelTwitchId, u.twitchId, token)).since] as const;
           } catch (e) {
-            if (e instanceof HelixError && e.code === 'helix_unauthorized') {
+            // 401: Token ungültig. 403: Scope fehlt (moderator:read:followers). Beides heißt „Kanal neu verbinden“ (11.2).
+            if (e instanceof HelixError && (e.code === 'helix_unauthorized' || e.code === 'helix_forbidden')) {
               await o.tokens.invalidate(channel).catch(() => undefined);
               throw TOKEN_INVALID();
             }

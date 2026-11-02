@@ -17,12 +17,16 @@ export const PURGE_STATUSES: readonly GiveawayStatus[] = ['closed', 'drawn', 'co
 
 const DAY_MS = 86_400_000;
 
-/** Löschbar ist nur, wer kein Konto hat und in keinem anderen laufenden Giveaway als Teilnehmer steht. */
+/**
+ * Löschbar ist nur, wer kein Konto hat, nirgends angemeldet oder Gewinner ist (auch nicht in abgeschlossenen Giveaways,
+ * Spec 7.3: der Gewinn muss meldbar bleiben) und in keinem anderen laufenden Giveaway gesehen wurde.
+ */
 async function deletable(c: pg.PoolClient, giveawayId: string, candidates: Pid[]): Promise<Pid[]> {
   if (candidates.length === 0) return [];
   const r = await c.query<{ pid: string }>(
     `SELECT p.pid FROM unnest($1::uuid[]) AS p(pid)
      WHERE NOT EXISTS (SELECT 1 FROM accounts a WHERE a.pid = p.pid)
+       AND NOT EXISTS (SELECT 1 FROM giveaway_participants gp WHERE gp.pid = p.pid AND (gp.registered OR gp.winner_status IS NOT NULL))
        AND NOT EXISTS (
          SELECT 1 FROM giveaway_participants gp JOIN giveaways g ON g.id = gp.giveaway_id
          WHERE gp.pid = p.pid AND g.id <> $2 AND g.status = ANY($3)

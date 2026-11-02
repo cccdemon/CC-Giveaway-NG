@@ -74,7 +74,7 @@ describe('Lesetabellen des Giveaways', () => {
 
   it('giveaways row carries counting, purge_days and closed_at', async () => {
     const { pool, rt } = await setup();
-    await createOpen(rt, { settings: { prize: 'Key', channels: [P1], counting: 'first_seen', purgeDays: 3 } });
+    await createOpen(rt, { kernelId: 'watchtime', settings: { prize: 'Key', channels: [P1], config: {}, counting: 'first_seen', purgeDays: 3 } });
     expect(await giveawayRow(pool)).toMatchObject({ counting: 'first_seen', purge_days: 3, closed_at: null, purged_at: null, boost: null });
     await must(rt, rt.handlers.close, { giveawayId: GID }, { now: new Date('2026-10-16T12:00:00Z') });
     expect(await giveawayRow(pool)).toMatchObject({ closed_at: new Date('2026-10-16T12:00:00Z') });

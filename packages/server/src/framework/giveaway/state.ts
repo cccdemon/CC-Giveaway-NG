@@ -96,12 +96,14 @@ interface CreatedPayload {
   settings: GiveawaySettings;
 }
 
+/** Liefert dasselbe Objekt zurück, wenn kein neuer pid und kein neuer Kanal dazukommt (häufigster Fall, spart Kopien). */
 function markSeen(s: GiveawayState, channel: Pid, pids: Pid[], at: string): GiveawayState['seen'] {
-  const seen = { ...s.seen };
+  let seen = s.seen;
   for (const pid of pids) {
     const old = seen[pid];
-    if (!old) seen[pid] = { since: at, channels: [channel] };
-    else if (!old.channels.includes(channel)) seen[pid] = { ...old, channels: [...old.channels, channel] };
+    if (old && old.channels.includes(channel)) continue;
+    if (seen === s.seen) seen = { ...s.seen };
+    seen[pid] = old ? { ...old, channels: [...old.channels, channel] } : { since: at, channels: [channel] };
   }
   return seen;
 }
@@ -128,7 +130,8 @@ function applyFramework(kernels: KernelRegistry, s: GiveawayState, e: EventRecor
     case GIVEAWAY_EVENTS.statusChanged: {
       const to = (e.payload as { to: GiveawayStatus }).to;
       const closedAt = to === 'closed' || to === 'cancelled' ? at : to === 'open' ? null : s.closedAt;
-      return { ...s, status: to, closedAt };
+      // Wieder geöffnet: neue Unangemeldete sammeln sich, die Löschfrist läuft nach dem nächsten Schließen erneut.
+      return { ...s, status: to, closedAt, purgedAt: to === 'open' ? null : s.purgedAt };
     }
     case GIVEAWAY_EVENTS.settingsChanged:
       return { ...s, settings: (e.payload as { after: GiveawaySettings }).after };

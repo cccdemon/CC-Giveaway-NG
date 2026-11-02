@@ -97,6 +97,9 @@ describe('helixGateChecker', () => {
     f.isFollower.mockRejectedValueOnce(new HelixError('helix_unauthorized', 401, null));
     await expect(f.checker.check(db.pool, input())).rejects.toMatchObject({ code: 'token_invalid' });
     expect(f.tokens.invalidate).toHaveBeenCalledWith(CHAN);
+    f.isFollower.mockRejectedValueOnce(new HelixError('helix_forbidden', 403, null));
+    await expect(f.checker.check(db.pool, input())).rejects.toMatchObject({ code: 'token_invalid' });
+    expect(f.tokens.invalidate).toHaveBeenCalledTimes(2);
     f.getUsers.mockRejectedValueOnce(new HelixError('helix_error', 500, null));
     await expect(f.checker.check(db.pool, input({ gates: [{ id: 'account_age', days: 30 }] }))).rejects.toMatchObject({ code: 'twitch_unreachable' });
   });

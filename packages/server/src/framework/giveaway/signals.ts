@@ -5,7 +5,7 @@ import type pg from 'pg';
 import type { Queryable } from '../../db/pool.js';
 import type { SignalUser } from '../../ingest/signals.js';
 import type { NewEvent } from '../../journal/types.js';
-import { FRAMEWORK_EVENTS, type Pid } from '../../kernel-api/index.js';
+import { FRAMEWORK_EVENTS, type AnyKernel, type Pid } from '../../kernel-api/index.js';
 import { reject, type Rejection } from '../../shared/rejection.js';
 import type { CommandContext, CommandHandler } from '../command-bus.js';
 import { GIVEAWAY_NOT_FOUND, INVALID_ID, UUID_RE, loadGiveawayRow } from './authorize.js';
@@ -64,6 +64,84 @@ export type ApplySignalsDeps = GiveawayDeps & { identities: IdentityResolver; ac
 
 export const WATCH_SEC_PER_MINUTE = 60;
 
+/** Platzhalter-pid für einen Nutzer ohne Identität, solange die Planung läuft. Nie im Journal. */
+const UNKNOWN_PREFIX = 'unknown:';
+
+interface Resolved {
+  presence: Pid[] | null;
+  chat: { pid: Pid; at: string; text: string; messageId: string }[];
+  follows: { pid: Pid; at: string }[];
+}
+
+function resolveWith(cmd: ApplySignalsCmd, map: Map<string, Pid>): Resolved {
+  const pidOf = (u: SignalUser): Pid | undefined => map.get(u.id);
+  return {
+    presence: cmd.presence === null ? null : [...new Set(cmd.presence.map(pidOf).filter((p): p is Pid => p !== undefined))],
+    chat: cmd.chat.flatMap((x) => (map.has(x.user.id) ? [{ pid: map.get(x.user.id)!, at: x.at, text: x.text, messageId: x.messageId }] : [])),
+    follows: cmd.follows.flatMap((x) => (map.has(x.user.id) ? [{ pid: map.get(x.user.id)!, at: x.at }] : [])),
+  };
+}
+
+/**
+ * Rein: welche Ereignisse ein Bündel im gegebenen Zustand erzeugt (6.1, 6.2, 6.4). prepare plant damit, welche Nutzer eine
+ * Identität brauchen (nur wer eine Anmeldung oder Gutschrift bekommt), decide schreibt genau dieses Ergebnis.
+ */
+export function planSignals(state: GiveawayState, kernel: AnyKernel, channel: Pid, minute: string, p: Resolved, live: boolean): NewEvent[] {
+  const s = state.settings;
+  const events: NewEvent[] = [];
+  const registered = new Set(Object.keys(state.registered));
+  const chat = [...p.chat].sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+
+  // 1. Anmeldung per Keyword (6.4), mit denselben Regeln wie der Befehl register.
+  if (s.keyword !== null) {
+    for (const m of chat) {
+      if (registered.has(m.pid) || !keywordMatches(m.text, s.keyword)) continue;
+      if (kernel.gateRegistration?.(state.kernelState, s.config, m.at)) continue;
+      registered.add(m.pid);
+      events.push({ type: GIVEAWAY_EVENTS.registered, payload: { pid: m.pid } });
+    }
+  }
+
+  const eligible = (pid: Pid): boolean => s.counting === 'first_seen' || registered.has(pid);
+  const factor = boostFactor(state.boost, minute);
+
+  // 2. Zuschauzeit (6.1): eine Buchung je Kanal und Minute, nie eine Minute doppelt oder rückwärts. Nur Kerne mit dem Dienst.
+  const lastMinute = state.watchMinutes[channel];
+  if (kernel.usesServices.includes('watchtime') && p.presence !== null && (lastMinute === undefined || Date.parse(minute) > Date.parse(lastMinute))) {
+    const entries = p.presence.filter(eligible).map((pid) => ({ pid, sec: WATCH_SEC_PER_MINUTE }));
+    if (entries.length > 0) events.push({ type: FRAMEWORK_EVENTS.watchCredited, payload: { minute, channel, factor, entries } });
+  }
+
+  // 3. Chat-Bonus (6.2): ab minWords Wörtern, Cooldown über den Zustand, nur für aktive Kanäle und Kerne mit dem Dienst.
+  if (kernel.usesServices.includes('chatBonus') && s.chatBonus.enabled && live) {
+    const last: Record<Pid, string> = { ...state.chatLast };
+    const sum = new Map<Pid, { sec: number; lastAt: string }>();
+    for (const m of chat) {
+      if (!eligible(m.pid) || wordCount(m.text) < s.chatBonus.minWords) continue;
+      const prev = last[m.pid];
+      if (prev !== undefined && Date.parse(m.at) - Date.parse(prev) < s.chatBonus.cooldownSec * 1000) continue;
+      last[m.pid] = m.at;
+      sum.set(m.pid, { sec: (sum.get(m.pid)?.sec ?? 0) + s.chatBonus.sec, lastAt: m.at });
+    }
+    if (sum.size > 0) {
+      const entries = [...sum].map(([pid, v]) => ({ pid, sec: v.sec, lastAt: v.lastAt }));
+      events.push({ type: FRAMEWORK_EVENTS.chatCredited, payload: { minute, channel, factor, entries } });
+    }
+  }
+  return events;
+}
+
+/** Alle pids, die in geplanten Ereignissen vorkommen. */
+function pidsIn(events: NewEvent[]): Set<Pid> {
+  const out = new Set<Pid>();
+  for (const e of events) {
+    const p = e.payload as { pid?: Pid; entries?: { pid: Pid }[] };
+    if (typeof p.pid === 'string') out.add(p.pid);
+    for (const x of p.entries ?? []) out.add(x.pid);
+  }
+  return out;
+}
+
 const NOT_INGEST = (): Rejection => reject('not_ingest', 'Signale nimmt nur der Ingest an.');
 const NOT_OPEN = (): Rejection => reject('not_open', 'Das Giveaway sammelt gerade nicht. Signale gehen nur im Zustand Offen.');
 const INVALID_MINUTE = (): Rejection => reject('invalid_minute', 'Die Minute muss ein ISO-Zeitpunkt auf volle Minute sein.');
@@ -108,18 +186,6 @@ export function applySignalsHandler(d: ApplySignalsDeps): CommandHandler<ApplySi
     return null;
   }
 
-  /** Wer ohne Identität eine bekommt: „ab erstem Erscheinen“ alle Anwesenden und Schreiber, sonst nur Keyword-Schreiber. */
-  function creatable(state: GiveawayState, cmd: ApplySignalsCmd, unknownUsers: SignalUser[]): SignalUser[] {
-    const { counting, keyword } = state.settings;
-    if (counting === 'first_seen') {
-      const active = new Set([...(cmd.presence ?? []), ...cmd.chat.map((m) => m.user)].map((u) => u.id));
-      return unknownUsers.filter((u) => active.has(u.id));
-    }
-    if (keyword === null) return [];
-    const keyworded = new Set(cmd.chat.filter((m) => keywordMatches(m.text, keyword)).map((m) => m.user.id));
-    return unknownUsers.filter((u) => keyworded.has(u.id));
-  }
-
   return {
     type: 'apply_signals',
     streamOf: (cmd) => giveawayStream(cmd.giveawayId),
@@ -129,68 +195,29 @@ export function applySignalsHandler(d: ApplySignalsDeps): CommandHandler<ApplySi
       const users = uniqueUsers([...(cmd.presence ?? []), ...cmd.chat.map((x) => x.user), ...cmd.follows.map((x) => x.user)]);
       const ids = users.map((u) => u.id);
       const map = await d.identities.resolve(c, ids);
-      const toCreate = creatable(state, cmd, users.filter((u) => !map.has(u.id)));
-      let created = 0;
-      if (toCreate.length > 0) {
-        const made = await d.identities.create(c, toCreate, ctx.now);
-        for (const [id, pid] of made) map.set(id, pid);
-        created = made.size;
-      }
-      const present = cmd.presence === null ? null : [...new Set(cmd.presence.map((u) => map.get(u.id)).filter((p): p is Pid => p !== undefined))];
-      await d.identities.touch(c, present ?? [], ctx.now);
-      const chat = cmd.chat.flatMap((x) => (map.has(x.user.id) ? [{ pid: map.get(x.user.id)!, at: x.at, text: x.text, messageId: x.messageId }] : []));
-      const follows = cmd.follows.flatMap((x) => (map.has(x.user.id) ? [{ pid: map.get(x.user.id)!, at: x.at }] : []));
       const live = (await d.activity.active(c, [cmd.channel], ctx.now)).has(cmd.channel);
-      return { presence: present, chat, follows, unknown: ids.filter((id) => !map.has(id)).length, created, live };
+      let created = 0;
+      // Eine Identität bekommt nur, wer in diesem Befehl eine Anmeldung oder Gutschrift bekäme (6.1: „Für andere entsteht keine pid“).
+      if (state.exists && state.status === 'open' && state.settings.channels.includes(cmd.channel)) {
+        const unknown = users.filter((u) => !map.has(u.id));
+        const trial = new Map([...map, ...unknown.map((u): [string, Pid] => [u.id, `${UNKNOWN_PREFIX}${u.id}`])]);
+        const planned = pidsIn(planSignals(state, d.kernels.get(state.kernelId), cmd.channel, cmd.minute, resolveWith(cmd, trial), live));
+        const toCreate = unknown.filter((u) => planned.has(`${UNKNOWN_PREFIX}${u.id}`));
+        if (toCreate.length > 0) {
+          const made = await d.identities.create(c, toCreate, ctx.now);
+          for (const [id, pid] of made) map.set(id, pid);
+          created = made.size;
+        }
+      }
+      const resolved = resolveWith(cmd, map);
+      await d.identities.touch(c, resolved.presence ?? [], ctx.now);
+      return { ...resolved, unknown: ids.filter((id) => !map.has(id)).length, created, live };
     },
     decide(state, cmd, _ctx, p) {
       if (!state.exists) return GIVEAWAY_NOT_FOUND();
       if (state.status !== 'open') return NOT_OPEN();
-      const s = state.settings;
-      if (!s.channels.includes(cmd.channel)) return reject('channel_not_in_giveaway', 'Dieser Kanal gehört nicht zum Giveaway.');
-
-      const events: NewEvent[] = [];
-      const registered = new Set(Object.keys(state.registered));
-      const chat = [...p.chat].sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
-
-      // 1. Anmeldung per Keyword (6.4), mit denselben Regeln wie der Befehl register.
-      if (s.keyword !== null) {
-        const kernel = d.kernels.get(state.kernelId);
-        for (const m of chat) {
-          if (registered.has(m.pid) || !keywordMatches(m.text, s.keyword)) continue;
-          if (kernel.gateRegistration?.(state.kernelState, s.config, m.at)) continue;
-          registered.add(m.pid);
-          events.push({ type: GIVEAWAY_EVENTS.registered, payload: { pid: m.pid } });
-        }
-      }
-
-      const eligible = (pid: Pid): boolean => s.counting === 'first_seen' || registered.has(pid);
-      const factor = boostFactor(state.boost, cmd.minute);
-
-      // 2. Zuschauzeit (6.1): eine Buchung je Kanal und Minute, nie eine Minute doppelt oder rückwärts.
-      const lastMinute = state.watchMinutes[cmd.channel];
-      if (p.presence !== null && (lastMinute === undefined || Date.parse(cmd.minute) > Date.parse(lastMinute))) {
-        const entries = p.presence.filter(eligible).map((pid) => ({ pid, sec: WATCH_SEC_PER_MINUTE }));
-        if (entries.length > 0) events.push({ type: FRAMEWORK_EVENTS.watchCredited, payload: { minute: cmd.minute, channel: cmd.channel, factor, entries } });
-      }
-
-      // 3. Chat-Bonus (6.2): ab minWords Wörtern, Cooldown über den Zustand, nur für aktive Kanäle.
-      if (s.chatBonus.enabled && p.live) {
-        const last: Record<Pid, string> = { ...state.chatLast };
-        const sum = new Map<Pid, { sec: number; lastAt: string }>();
-        for (const m of chat) {
-          if (!eligible(m.pid) || wordCount(m.text) < s.chatBonus.minWords) continue;
-          const prev = last[m.pid];
-          if (prev !== undefined && Date.parse(m.at) - Date.parse(prev) < s.chatBonus.cooldownSec * 1000) continue;
-          last[m.pid] = m.at;
-          sum.set(m.pid, { sec: (sum.get(m.pid)?.sec ?? 0) + s.chatBonus.sec, lastAt: m.at });
-        }
-        if (sum.size > 0) {
-          const entries = [...sum].map(([pid, v]) => ({ pid, sec: v.sec, lastAt: v.lastAt }));
-          events.push({ type: FRAMEWORK_EVENTS.chatCredited, payload: { minute: cmd.minute, channel: cmd.channel, factor, entries } });
-        }
-      }
-      return events;
+      if (!state.settings.channels.includes(cmd.channel)) return reject('channel_not_in_giveaway', 'Dieser Kanal gehört nicht zum Giveaway.');
+      return planSignals(state, d.kernels.get(state.kernelId), cmd.channel, cmd.minute, p, p.live);
     },
   };
 }
