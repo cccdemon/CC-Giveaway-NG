@@ -3,6 +3,7 @@ import type { AnyKernel, KernelCommandSpec } from '../src/kernel-api/index.js';
 import { FRAMEWORK_REDUCER_VERSION, KernelRegistry, defaultKernels, versionStamp } from '../src/framework/kernel-registry.js';
 import { instantKernel } from '../src/kernels/instant/index.js';
 import { watchtimeKernel } from '../src/kernels/watchtime/index.js';
+import { ticketsKernel } from '../src/kernels/tickets/index.js';
 import { JournalError } from '../src/journal/types.js';
 
 function fake(id: string, eventType: string, commands: string[] = [], commandSpecs: KernelCommandSpec[] = []): AnyKernel {
@@ -15,13 +16,14 @@ function fake(id: string, eventType: string, commands: string[] = [], commandSpe
 }
 
 describe('KernelRegistry', () => {
-  it('defaultKernels has instant and watchtime', () => {
+  it('defaultKernels has instant, watchtime and tickets', () => {
     const r = defaultKernels();
     expect(r.get('instant').id).toBe('instant');
     expect(r.get('watchtime').id).toBe('watchtime');
+    expect(r.get('tickets').id).toBe('tickets');
     expect(r.has('instant')).toBe(true);
     expect(r.has('nope')).toBe(false);
-    expect(r.list().map((x) => x.id)).toEqual(['instant', 'watchtime']);
+    expect(r.list().map((x) => x.id)).toEqual(['instant', 'watchtime', 'tickets']);
   });
 
   it('refuses a chat word on a streamer command, an invalid chat word and a duplicate chat word', () => {
@@ -88,7 +90,7 @@ describe('KernelRegistry', () => {
   });
 
   it('defaultKernels versionStamp', () => {
-    expect(defaultKernels().versionStamp()).toBe(versionStamp(FRAMEWORK_REDUCER_VERSION, [instantKernel, watchtimeKernel]));
+    expect(defaultKernels().versionStamp()).toBe(versionStamp(FRAMEWORK_REDUCER_VERSION, [instantKernel, watchtimeKernel, ticketsKernel]));
     expect(FRAMEWORK_REDUCER_VERSION).toBe(5);
   });
 });

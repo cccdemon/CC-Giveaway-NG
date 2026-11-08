@@ -1,6 +1,7 @@
 import type { AnyKernel } from '../kernel-api/index.js';
 import { JournalError } from '../journal/types.js';
 import { instantKernel } from '../kernels/instant/index.js';
+import { ticketsKernel } from '../kernels/tickets/index.js';
 import { watchtimeKernel } from '../kernels/watchtime/index.js';
 
 export const FRAMEWORK_REDUCER_VERSION = 5; // 2: DrawRecord.excluded, 3: registered[pid].eventId, 4: legal, legalEventId, 5: Dienste (seen, boost, …)
@@ -74,5 +75,6 @@ export function defaultKernels(): KernelRegistry {
   const r = new KernelRegistry();
   r.register(instantKernel);
   r.register(watchtimeKernel);
+  r.register(ticketsKernel);
   return r;
 }
