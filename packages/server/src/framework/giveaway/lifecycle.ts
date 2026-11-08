@@ -74,6 +74,8 @@ const TRANSITION_SPEC: Record<TransitionType, { to: GiveawayStatus; from: readon
 };
 
 const SETTINGS_OPEN: readonly GiveawayStatus[] = ['draft', 'open', 'paused'];
+/** Grund der Umkehrungen, die ein Kern beim Abbruch schreibt. */
+const CANCEL_REASON = 'Abbruch des Giveaways.';
 const SETTINGS_LOCKED = (): Rejection => reject('settings_locked', 'Nach dem Schließen änderst du keine Regeln mehr.');
 
 const TEXT_MAX = 200;
@@ -196,9 +198,9 @@ export function transitionHandler(d: GiveawayDeps, type: TransitionType): Comman
       }
       const changed = { type: GIVEAWAY_EVENTS.statusChanged, payload: { from, to: spec.to } };
       if (type !== 'cancel_giveaway') return [changed];
-      // Abbruch: der Kern darf nachbuchen, Kern C erstattet alle Tickets (§7.1).
+      // Abbruch: der Kern darf nachbuchen, Kern C erstattet alle Tickets als Umkehrung je Kauf (§7.1, §5.3).
       const kernel = d.kernels.get(state.kernelId);
-      return [changed, ...fromKernelEvents(kernel, kernel.onCancel?.(state.kernelState, state.settings.config) ?? [])];
+      return [changed, ...fromKernelEvents(kernel, kernel.onCancel?.(state.kernelState, state.settings.config) ?? [], CANCEL_REASON)];
     },
   };
 }

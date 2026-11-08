@@ -26,6 +26,12 @@ export interface TicketsState {
   spent: Record<Pid, number>;
   tickets: Record<Pid, number>;
   registered: Pid[]; // sortiert, eindeutig
+  /** Offene Käufe in Journal-Reihenfolge. Eine Erstattung mit reversesEventId entfernt ihren Kauf. Der Abbruch erstattet jeden Eintrag. */
+  purchases: Purchase[];
+}
+
+export interface Purchase extends TicketPayload {
+  eventId: string;
 }
 
 export interface TicketPayload {
@@ -88,7 +94,11 @@ function book(state: TicketsState, p: TicketPayload, sign: 1 | -1): TicketsState
   return { ...state, tickets: { ...state.tickets, [p.pid]: tickets }, spent: { ...state.spent, [p.pid]: spent } };
 }
 
-const refund = (p: TicketPayload): NewKernelEvent => ({ type: TICKETS_EVENTS.refunded, payload: { pid: p.pid, count: p.count, coins: p.coins } });
+const refund = (p: TicketPayload, reversesEventId?: string): NewKernelEvent => ({
+  type: TICKETS_EVENTS.refunded,
+  payload: { pid: p.pid, count: p.count, coins: p.coins },
+  ...(reversesEventId === undefined ? {} : { reversesEventId }),
+});
 
 export const ticketsKernel: Kernel<TicketsConfig, TicketsState> = {
   id: 'tickets',
@@ -150,7 +160,7 @@ export const ticketsKernel: Kernel<TicketsConfig, TicketsState> = {
   commands: [{ type: BUY_TICKETS, label: 'Tickets kaufen', issuer: 'participant', chat: { word: '!ticket' } }],
 
   initialState() {
-    return { sec: {}, spent: {}, tickets: {}, registered: [] };
+    return { sec: {}, spent: {}, tickets: {}, registered: [], purchases: [] };
   },
 
   reduce(state, event) {
@@ -176,11 +186,15 @@ export const ticketsKernel: Kernel<TicketsConfig, TicketsState> = {
       }
       case TICKETS_EVENTS.bought: {
         const p = ticketPayloadOf(event.payload);
-        return p ? book(state, p, 1) : state;
+        if (!p) return state;
+        return { ...book(state, p, 1), purchases: [...state.purchases, { ...p, eventId: event.id }] };
       }
       case TICKETS_EVENTS.refunded: {
         const p = ticketPayloadOf(event.payload);
-        return p ? book(state, p, -1) : state;
+        if (!p) return state;
+        const next = book(state, p, -1);
+        if (event.reversesEventId === null) return next;
+        return { ...next, purchases: state.purchases.filter((x) => x.eventId !== event.reversesEventId) };
       }
       default:
         return state;
@@ -210,10 +224,7 @@ export const ticketsKernel: Kernel<TicketsConfig, TicketsState> = {
   },
 
   onCancel(state) {
-    return Object.keys(state.tickets)
-      .sort()
-      .filter((pid) => ticketsOf(state, pid) > 0)
-      .map((pid) => refund({ pid, count: ticketsOf(state, pid), coins: state.spent[pid] ?? 0 }));
+    return state.purchases.map((p) => refund(p, p.eventId));
   },
 
   viewerView(state, pid, config) {

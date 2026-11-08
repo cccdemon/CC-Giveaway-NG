@@ -89,13 +89,17 @@ export function toKernelEvent(e: EventRecord): KernelEvent {
   return { id: e.id, type: e.type, payload: e.payload, at: e.createdAt.toISOString(), reversesEventId: e.reversesEventId };
 }
 
-/** Ereignisse aus kernel.decide oder kernel.onCancel für das Journal. Ein Kern schreibt nur Typen mit seinem Präfix (§4). */
-export function fromKernelEvents(kernel: AnyKernel, out: NewKernelEvent[]): NewEvent[] {
+/**
+ * Ereignisse aus kernel.decide oder kernel.onCancel für das Journal. Ein Kern schreibt nur Typen mit seinem Präfix (§4).
+ * Hebt ein Ereignis ein früheres auf (reversesEventId), trägt es den Grund des Rahmen-Befehls (§5.1: Grund bei Umkehrungen).
+ */
+export function fromKernelEvents(kernel: AnyKernel, out: NewKernelEvent[], reason?: string): NewEvent[] {
   return out.map((e): NewEvent => {
     if (!e.type.startsWith(`${kernel.id}_`)) {
       throw new Error(`Der Kern ${kernel.id} hat ein fremdes Ereignis erzeugt: ${e.type}`);
     }
-    return { type: e.type, payload: e.payload };
+    if (e.reversesEventId === undefined) return { type: e.type, payload: e.payload };
+    return { type: e.type, payload: e.payload, reversesEventId: e.reversesEventId, ...(reason === undefined ? {} : { reason }) };
   });
 }
 

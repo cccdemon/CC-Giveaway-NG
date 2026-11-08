@@ -67,6 +67,7 @@ export function formatDuration(sec: number): string {
 }
 
 export interface KernelEvent {
+  /** Journal-ID. Leer (''), solange der Rahmen ein Bündel nur plant (apply_signals), erst beim Schreiben vergeben. */
   id: string;
   type: string;
   payload: unknown;
@@ -77,6 +78,8 @@ export interface KernelEvent {
 export interface NewKernelEvent {
   type: string;
   payload: unknown;
+  /** Gesetzt, wenn das Ereignis ein früheres aufhebt (z. B. Erstattung beim Abbruch). Der Rahmen ergänzt den Grund. */
+  reversesEventId?: string;
 }
 
 export interface PoolEntry {

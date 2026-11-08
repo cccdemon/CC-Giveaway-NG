@@ -28,6 +28,8 @@ const correct = (entries: { pid: string; sec: number }[]) => ev(FRAMEWORK_EVENTS
 const reg = (pid: string) => ev(FRAMEWORK_EVENTS.registered, { pid });
 const bought = (pid: string, count: number, coins: number) => ev(TICKETS_EVENTS.bought, { pid, count, coins });
 const refunded = (pid: string, count: number, coins: number) => ev(TICKETS_EVENTS.refunded, { pid, count, coins });
+/** Erstattung als Umkehrung eines Kaufs, wie sie revert oder cancel schreiben. */
+const refundOf = (b: KernelEvent): KernelEvent => ({ ...ev(TICKETS_EVENTS.refunded, b.payload), reversesEventId: b.id });
 
 const k = ticketsKernel;
 /** Coin-Basis 60 s, damit eine Minute ein Coin ist. */
@@ -40,7 +42,7 @@ const refundedDef = () => k.events.find((d) => d.type === TICKETS_EVENTS.refunde
 
 describe('Kern C Ticketkauf', () => {
   it('initialState is empty, defaults are 7200 / 1 / 0', () => {
-    expect(fresh()).toEqual({ sec: {}, spent: {}, tickets: {}, registered: [] });
+    expect(fresh()).toEqual({ sec: {}, spent: {}, tickets: {}, registered: [], purchases: [] });
     expect(defaultConfig(k.configSchema)).toEqual({ coinBaseSec: 7200, ticketPriceCoins: 1, maxTicketsPerPerson: 0 });
   });
 
@@ -156,14 +158,37 @@ describe('Kern C Ticketkauf', () => {
     expect(refundedDef().reversal).toEqual({ kind: 'none', why: 'Eine Erstattung bleibt. Kaufe die Tickets neu.' });
   });
 
-  it('onCancel refunds every holder sorted by pid with count = tickets and coins = spent, empty without tickets', () => {
-    const s = apply(fresh(), [bought('p-b', 2, 2), bought('p-a', 1, 3), bought('p-c', 1, 1), refunded('p-c', 1, 1)]);
+  it('reduce tracks open purchases by event id; a refund that reverses a purchase removes it', () => {
+    const b1 = bought('p-b', 2, 2);
+    const b2 = bought('p-a', 1, 3);
+    const s = apply(fresh(), [b1, b2]);
+    expect(s.purchases).toEqual([
+      { eventId: b1.id, pid: 'p-b', count: 2, coins: 2 },
+      { eventId: b2.id, pid: 'p-a', count: 1, coins: 3 },
+    ]);
+    const r = apply(s, [refundOf(b1)]);
+    expect(r.purchases).toEqual([{ eventId: b2.id, pid: 'p-a', count: 1, coins: 3 }]);
+    expect(r.tickets).toEqual({ 'p-b': 0, 'p-a': 1 });
+    // Eine Erstattung ohne Bezug bucht nur Tickets und Coins, die Liste bleibt (defensiv).
+    const loose = apply(s, [refunded('p-a', 1, 3)]);
+    expect(loose.purchases).toHaveLength(2);
+    expect(loose.tickets['p-a']).toBe(0);
+  });
+
+  it('onCancel refunds every open purchase in journal order with reversesEventId, empty without purchases', () => {
+    const b1 = bought('p-b', 2, 2);
+    const b2 = bought('p-a', 1, 3);
+    const b3 = bought('p-c', 1, 1);
+    const s = apply(fresh(), [b1, b2, b3, refundOf(b3)]);
     expect(k.onCancel!(s, config)).toEqual([
-      { type: TICKETS_EVENTS.refunded, payload: { pid: 'p-a', count: 1, coins: 3 } },
-      { type: TICKETS_EVENTS.refunded, payload: { pid: 'p-b', count: 2, coins: 2 } },
+      { type: TICKETS_EVENTS.refunded, payload: { pid: 'p-b', count: 2, coins: 2 }, reversesEventId: b1.id },
+      { type: TICKETS_EVENTS.refunded, payload: { pid: 'p-a', count: 1, coins: 3 }, reversesEventId: b2.id },
     ]);
     expect(k.onCancel!(fresh(), config)).toEqual([]);
-    expect(apply(s, k.onCancel!(s, config).map((e) => ev(e.type, e.payload))).tickets).toEqual({ 'p-a': 0, 'p-b': 0, 'p-c': 0 });
+    const after = apply(s, k.onCancel!(s, config).map((e) => ({ ...ev(e.type, e.payload), reversesEventId: e.reversesEventId ?? null })));
+    expect(after.tickets).toEqual({ 'p-a': 0, 'p-b': 0, 'p-c': 0 });
+    expect(after.purchases).toEqual([]);
+    expect(k.onCancel!(after, config)).toEqual([]);
   });
 
   it('pool lists holders with weight = tickets sorted by pid; viewerView lines Zuschauzeit, Coins, Tickets', () => {
