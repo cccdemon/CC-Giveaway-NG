@@ -66,7 +66,10 @@ fachlichen Begriffe (Giveaway, Kern, Topf, Chance …) stehen in
 | **Plattform-Bot** | Ein Twitch-Konto des Betreibers, über das die Plattform Chat liest und Ansagen sendet. Es erteilt der App einmal die Rechte `user:bot`, `user:read:chat`, `user:write:chat`. Danach reichen App-Tokens. `TWITCH_BOT_USER_ID` ist seine Twitch-ID. |
 | **Signalqualität** | Die Tabelle `channel_status`: live/offline, Zuschauerzahl, Chatters, letztes Signal, Problem. Betriebsdaten des Ingest, kein Nachweis, nicht im Journal. Der Statusblock warnt: rot (Token ungültig), gelb (live ohne Signal über 2 Minuten, Twitch antwortet nicht), Hinweis (Abdeckung unter 50 %). |
 | **Zuschauzeit** | Der Rahmen-Dienst, der aus der Anwesenheit je Minute das Ereignis `watch_credited` macht: 60 s je anwesender `pid`, je Kanal und Minute genau einmal. Nur Kanäle im Giveaway, nur im Zustand Offen. |
-| **Coin** | Einheit von Kern A: Zuschauzeit ÷ Coin-Basis (Default 2 h), abgerundet. Topf = alle mit mindestens 1 Coin, Gewicht = Coins. |
+| **Coin** | Einheit von Kern A und Kern C: Zuschauzeit ÷ Coin-Basis (Default 2 h), abgerundet. Kern A: Topf = alle mit mindestens 1 Coin, Gewicht = Coins. Kern C: Coins kaufen Tickets. |
+| **Geldbörse** | Die Coins einer Person in einem Giveaway von Kern C: verdient minus für Tickets ausgegeben. Es gibt kein Guthaben über Giveaways hinweg. Eine Zeit-Korrektur ins Minus lässt gekaufte Tickets stehen. |
+| **Ticket** | Ein mit Coins gekauftes Los (Kern C `tickets`). Befehl `buy_tickets` im Portal oder `!ticket <n>` im Chat, nur für angemeldete Teilnehmer, nur im Zustand Offen. Preis je Ticket und Höchstzahl je Person sind Einstellungen. Topf = alle mit mindestens 1 Ticket, Gewicht = Tickets. Rückgängig eines Kaufs und der Abbruch erstatten die gezahlten Coins (`tickets_refunded`). |
+| **Chat-Befehl** | Das Wort eines Kern-Befehls im Chat (z. B. `!ticket 3`): erstes Wort gleich dem Wort, zweites Wort die Anzahl. Läuft im Befehl `apply_signals`, nur für Teilnehmer. Eine Ablehnung bleibt bis Teilprojekt 8 ohne Antwort im Chat. Ein Keyword darf keinem Chat-Befehl gleichen. |
 | **Chat-Bonus** | Sekunden für Chatnachrichten ab 4 Wörtern (Default +2 s, 10 s Cooldown je Person), gebündelt als `chat_credited` je Kanal und Minute. Zählt nur, wenn der Kanal live ist und Signale liefert. Abschaltbar, Werte bleiben. |
 | **Boost** | Faktor 2 bis 10 für 1 Minute bis 24 Stunden auf Zuschauzeit und Chat-Bonus. Startet nur mit einem aktiven Kanal, läuft über Pausen weiter, das Ende setzt der Scheduler per Zeitgeber `framework:stop_boost`. |
 | **Zeit-Korrektur** | Das Ereignis `watch_corrected`: der Streamer bucht Sekunden nach oder ab, mit Grund. Es ist auch das Gegen-Ereignis jeder Gutschrift (Rückgängig). |
@@ -74,7 +77,7 @@ fachlichen Begriffe (Giveaway, Kern, Topf, Chance …) stehen in
 | **Zählweise** | Je Giveaway: „ab Anmeldung“ (nur angemeldete Teilnehmer sammeln) oder „ab erstem Erscheinen“ (jeder Anwesende bekommt eine `pid` und sammelt, gewinnen können nur Angemeldete). |
 | **Keyword** | Ein Wort im Chat (z. B. `!werwolf`), mit dem sich ein Zuschauer anmeldet. Erstes Wort der Nachricht, Groß- und Kleinschreibung egal. Dieselben Regeln wie der Knopf im Portal. |
 | **Löschfrist** | Unangemeldete `pid`s der Zählweise „ab erstem Erscheinen“ verlieren ihre Zuordnung Schließen + 7 Tage (einstellbar) nach dem Giveaway: Befehl `purge_unregistered`, Ereignis `unregistered_purged`, die `identities`-Zeile fällt. Nie, wenn die Person ein Konto hat, irgendwo angemeldet oder Gewinner ist oder in einem anderen laufenden Giveaway gesehen wurde. |
-| **Teilprojekt** | Ein Abschnitt des Neubaus mit eigenem Umsetzungsplan (NEW_DESIGN.md, Abschnitt 14). Teilprojekte 1 bis 5 (Fundament, Kern-Vertrag + Kern B, Konten + Identität, Ingest, Rahmen-Dienste + Kern A) sind fertig. |
+| **Teilprojekt** | Ein Abschnitt des Neubaus mit eigenem Umsetzungsplan (NEW_DESIGN.md, Abschnitt 14). Teilprojekte 1 bis 6 (Fundament, Kern-Vertrag + Kern B, Konten + Identität, Ingest, Rahmen-Dienste + Kern A, Kern C Ticketkauf) sind fertig. |
 
 ## Prozesse
 
@@ -96,7 +99,7 @@ Drei Prozesse aus `packages/server`:
   - `INGEST_ADAPTER=twitch|simulator` (Default `twitch`). Der Simulator braucht keine Twitch-Daten: `INGEST_SIM_VIEWERS` (Default 20), `INGEST_SIM_SEED` (Default 1).
   - Mehrere Worker: `INGEST_WORKERS` (Default 1) und je Prozess `INGEST_WORKER_INDEX` (0 bis Workers − 1). Worker 0 legt das Conduit an, die anderen warten darauf.
   - Alle 30 s liest er das Kanalverzeichnis: verbundene Kanäle mit gültigem Token. Kanäle in einem offenen Giveaway bekommen Chat, Follow und Anwesenheit je Minute, alle anderen nur Live-Status und Zuschauerzahl.
-  - Je Bündel ein Befehl `apply_signals` je offenem Giveaway des Kanals. Er prüft Rechte, Zustand und Kanal, löst Twitch-IDs zu `pid`s auf (legt sie nur für Unbekannte an, die in diesem Bündel eine Anmeldung oder Gutschrift bekommen) und schreibt Keyword-Anmeldung, `watch_credited` und `chat_credited`. Signale für Kanäle, die nicht live sind oder keine Signale liefern, bringen keinen Chat-Bonus.
+  - Je Bündel ein Befehl `apply_signals` je offenem Giveaway des Kanals. Er prüft Rechte, Zustand und Kanal, löst Twitch-IDs zu `pid`s auf (legt sie nur für Unbekannte an, die in diesem Bündel eine Anmeldung oder Gutschrift bekommen) und schreibt Keyword-Anmeldung, Kern-Ereignisse aus Chat-Befehlen (z. B. `tickets_bought` aus `!ticket 2`), `watch_credited` und `chat_credited`. Signale für Kanäle, die nicht live sind oder keine Signale liefern, bringen keinen Chat-Bonus.
   - Twitch-Fehler: drei Versuche mit 1 s, 2 s, 4 s. Danach steht `twitch_error` am Kanal, der nächste Minutenlauf versucht es wieder. Ein abgelehnter Token-Refresh setzt das Token auf `invalid`, der Kanal wird rot, bis der Streamer ihn neu verbindet.
 
 ### Bot einrichten
