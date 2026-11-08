@@ -7,12 +7,14 @@ export const KEEPALIVE_GRACE_SEC = 10;
 const DEFAULT_KEEPALIVE_SEC = 10;
 const RECONNECT_BASE_MS = 1_000;
 const RECONNECT_MAX_MS = 4_000;
+/** So viele message_ids merkt sich eine Verbindung für die Entdopplung. Twitch liefert mindestens einmal, besonders um einen Reconnect. */
+export const SEEN_MESSAGES_MAX = 5_000;
 
 export type EventSubMessage =
   | { type: 'session_welcome'; sessionId: string; keepaliveSec: number }
   | { type: 'session_keepalive' }
   | { type: 'session_reconnect'; url: string }
-  | { type: 'notification'; subscriptionType: string; event: Record<string, unknown> }
+  | { type: 'notification'; subscriptionType: string; messageId: string | null; event: Record<string, unknown> }
   | { type: 'revocation'; subscriptionType: string; status: string; broadcasterId: string | null }
   | { type: 'unknown' };
 
@@ -47,7 +49,7 @@ export function parseMessage(raw: string): EventSubMessage {
     }
     case 'notification': {
       const subscriptionType = str(metadata.subscription_type);
-      return subscriptionType === null ? UNKNOWN : { type: 'notification', subscriptionType, event: obj(payload.event) };
+      return subscriptionType === null ? UNKNOWN : { type: 'notification', subscriptionType, messageId: str(metadata.message_id), event: obj(payload.event) };
     }
     case 'revocation': {
       const subscription = obj(payload.subscription);
@@ -119,6 +121,8 @@ export class EventSubSocket {
   /** Ersatzverbindung nach session_reconnect, noch ohne Welcome. */
   private pending: SocketLike | null = null;
   private readonly retired = new WeakSet<SocketLike>();
+  /** Zuletzt gelieferte message_ids, in Ankunftsreihenfolge. Überlebt den Reconnect, weil Twitch dann alte Nachrichten wiederholt. */
+  private readonly seen = new Set<string>();
   private closedByUs = false;
   private keepaliveTimer: NodeJS.Timeout | undefined;
   private keepaliveMs = (DEFAULT_KEEPALIVE_SEC + KEEPALIVE_GRACE_SEC) * 1000;
@@ -182,6 +186,9 @@ export class EventSubSocket {
         this.pending = this.open(m.url, s);
         return;
       case 'notification':
+        if (m.messageId !== null && !this.firstDelivery(m.messageId)) return;
+        this.o.onMessage(m);
+        return;
       case 'revocation':
         this.o.onMessage(m);
         return;
@@ -211,6 +218,17 @@ export class EventSubSocket {
     await this.sleep(delay);
     if (this.closedByUs) return;
     this.open(this.url, null);
+  }
+
+  /** Merkt sich die message_id. Liefert false, wenn sie schon da war. Älteste Einträge fallen ab SEEN_MESSAGES_MAX heraus. */
+  private firstDelivery(messageId: string): boolean {
+    if (this.seen.has(messageId)) return false;
+    this.seen.add(messageId);
+    if (this.seen.size > SEEN_MESSAGES_MAX) {
+      const oldest = this.seen.values().next().value;
+      if (oldest !== undefined) this.seen.delete(oldest);
+    }
+    return true;
   }
 
   private armKeepalive(): void {

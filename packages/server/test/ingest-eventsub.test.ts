@@ -18,7 +18,7 @@ describe('parseMessage', () => {
     expect(parseMessage(raw('eventsub-welcome'))).toEqual({ type: 'session_welcome', sessionId: 'AQoQILE98gtqShGmLD7AM6yJThAB', keepaliveSec: 10 });
     expect(parseMessage(raw('eventsub-keepalive'))).toEqual({ type: 'session_keepalive' });
     expect(parseMessage(raw('eventsub-reconnect'))).toEqual({ type: 'session_reconnect', url: 'wss://eventsub.wss.twitch.tv/ws?challenge=beispiel&id=AQoQILE98gtqShGmLD7AM6yJThAB' });
-    expect(parseMessage(raw('eventsub-chat'))).toMatchObject({ type: 'notification', subscriptionType: 'channel.chat.message', event: { chatter_user_id: '12345' } });
+    expect(parseMessage(raw('eventsub-chat'))).toMatchObject({ type: 'notification', subscriptionType: 'channel.chat.message', messageId: 'befa7b53-d79d-478f-86b9-120f112b044e', event: { chatter_user_id: '12345' } });
     expect(parseMessage(raw('eventsub-revocation'))).toEqual({ type: 'revocation', subscriptionType: 'channel.chat.message', status: 'authorization_revoked', broadcasterId: '1001' });
     expect(parseMessage('{nicht json')).toEqual({ type: 'unknown' });
     expect(parseMessage('{"metadata":{"message_type":"neu"},"payload":{}}')).toEqual({ type: 'unknown' });
@@ -95,6 +95,24 @@ describe('EventSubSocket', () => {
     expect(h.sockets[0]!.closed).toBe(true);
     h.sockets[0]!.emit('close', { code: 1000 });
     expect(h.sockets).toHaveLength(1);
+  });
+
+  it('drops a notification whose message_id was already delivered (EventSub at-least-once)', async () => {
+    const h = harness();
+    const started = h.socket.start();
+    h.welcome(h.sockets[0]!);
+    await started;
+    h.sockets[0]!.emit('message', { data: raw('eventsub-chat') });
+    h.sockets[0]!.emit('message', { data: raw('eventsub-chat') });
+    h.sockets[0]!.emit('message', { data: raw('eventsub-follow') });
+    h.sockets[0]!.emit('message', { data: raw('eventsub-chat').replace('befa7b53-d79d-478f-86b9-120f112b044e', 'ffffffff-0000-4000-8000-000000000001') });
+    expect(h.messages.map((m) => (m.type === 'notification' ? m.subscriptionType : m.type))).toEqual(['channel.chat.message', 'channel.follow', 'channel.chat.message']);
+    // Nach einem Reconnect liefert Twitch Nachrichten der alten Sitzung noch einmal: auch dann nur einmal.
+    h.sockets[0]!.emit('message', { data: raw('eventsub-reconnect') });
+    h.welcome(h.sockets[1]!, 'sess-2');
+    h.sockets[1]!.emit('message', { data: raw('eventsub-chat') });
+    expect(h.messages).toHaveLength(3);
+    await h.socket.close();
   });
 
   it('reconnects when no keepalive arrives in time', async () => {
