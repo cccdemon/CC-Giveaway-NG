@@ -19,6 +19,9 @@ export function versionStamp(frameworkVersion: number, kernels: readonly { id: s
   return hash & 0x7fffffff;
 }
 
+/** Ein Chat-Wort eines Kern-Befehls: ein Wort ohne Leerzeichen, wie das Keyword der Anmeldung. */
+export const CHAT_WORD_RE = /^\S{2,32}$/;
+
 export class KernelRegistry {
   private readonly kernels = new Map<string, AnyKernel>();
 
@@ -30,12 +33,20 @@ export class KernelRegistry {
       }
     }
     const seen = new Set<string>();
+    const words = new Set<string>();
     for (const c of k.commands) {
       if (c.type.includes(':')) {
         throw new Error(`Der Befehlstyp ${c.type} darf keinen Doppelpunkt enthalten. Der ist für Rahmen-Zeitgeber reserviert.`);
       }
       if (seen.has(c.type)) throw new Error(`Befehl ${c.type} steht im Kern ${k.id} doppelt.`);
       seen.add(c.type);
+      if (c.chat) {
+        if (c.issuer !== 'participant') throw new Error(`Der Chat-Befehl ${c.type} braucht issuer 'participant'.`);
+        if (!CHAT_WORD_RE.test(c.chat.word)) throw new Error(`Das Chat-Wort ${c.chat.word} ist ein Wort mit 2 bis 32 Zeichen ohne Leerzeichen.`);
+        const word = c.chat.word.toLowerCase();
+        if (words.has(word)) throw new Error(`Das Chat-Wort ${c.chat.word} steht im Kern ${k.id} doppelt.`);
+        words.add(word);
+      }
     }
     this.kernels.set(k.id, k);
   }

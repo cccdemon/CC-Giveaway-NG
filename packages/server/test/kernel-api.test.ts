@@ -51,6 +51,14 @@ describe('kernel-api', () => {
     } as const;
     const ok: Kernel<{ n: number }, { x: number }> = { ...base, pool: () => [] };
     expect(ok.id).toBe('k');
+    // Optionale Teile des Vertrags: Chat-Auslöser am Befehl, Abbruch-Hook am Kern (Teilprojekt 6).
+    const withChat: Kernel<{ n: number }, { x: number }> = {
+      ...ok,
+      commands: [{ type: 'buy', label: 'Kaufen', issuer: 'participant', chat: { word: '!buy' } }],
+      onCancel: () => [],
+    };
+    expect(withChat.commands[0]?.chat?.word).toBe('!buy');
+    expect(withChat.onCancel?.({ x: 0 }, { n: 1 })).toEqual([]);
     // @ts-expect-error pool fehlt
     const bad: Kernel<{ n: number }, { x: number }> = { ...base };
     expect(bad).toBeDefined();

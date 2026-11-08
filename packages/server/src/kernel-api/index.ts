@@ -94,6 +94,11 @@ export interface KernelCommandSpec {
   type: string;
   label: string;
   issuer: 'participant' | 'streamer' | 'scheduler';
+  /**
+   * Auslöser im Chat: erstes Wort der Nachricht, Groß-/Kleinschreibung egal. Nur für issuer 'participant'.
+   * Das zweite Wort wird als args.count übergeben (ganze Zahl ≥ 1), fehlt es, gilt 1 (NEW_DESIGN.md 8.3 „!ticket <n>“).
+   */
+  chat?: { word: string };
 }
 
 export type KernelReversal =
@@ -146,6 +151,8 @@ export interface Kernel<Config, State> {
   decide?(state: State, cmd: KernelCommand, config: Config, now: string): NewKernelEvent[] | Rejection;
   gateRegistration?(state: State, config: Config, now: string): Rejection | null;
   timers?(state: State, config: Config): TimerSpec[];
+  /** Ereignisse, die der Rahmen beim Abbruch nach giveaway_status_changed schreibt (NEW_DESIGN.md 7.1: Kern C erstattet Tickets). */
+  onCancel?(state: State, config: Config): NewKernelEvent[];
   viewerView(state: State, pid: Pid, config: Config): ViewerView;
   display: DisplaySpec;
 }

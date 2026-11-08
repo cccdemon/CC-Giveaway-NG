@@ -1,16 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import type { AnyKernel } from '../src/kernel-api/index.js';
+import type { AnyKernel, KernelCommandSpec } from '../src/kernel-api/index.js';
 import { FRAMEWORK_REDUCER_VERSION, KernelRegistry, defaultKernels, versionStamp } from '../src/framework/kernel-registry.js';
 import { instantKernel } from '../src/kernels/instant/index.js';
 import { watchtimeKernel } from '../src/kernels/watchtime/index.js';
 import { JournalError } from '../src/journal/types.js';
 
-function fake(id: string, eventType: string, commands: string[] = []): AnyKernel {
+function fake(id: string, eventType: string, commands: string[] = [], commandSpecs: KernelCommandSpec[] = []): AnyKernel {
   return {
     ...instantKernel,
     id,
     events: [{ type: eventType, version: 1, check: () => null, reversal: { kind: 'void' } }],
-    commands: commands.map((type) => ({ type, label: type, issuer: 'streamer' as const })),
+    commands: [...commands.map((type) => ({ type, label: type, issuer: 'streamer' as const })), ...commandSpecs],
   };
 }
 
@@ -22,6 +22,23 @@ describe('KernelRegistry', () => {
     expect(r.has('instant')).toBe(true);
     expect(r.has('nope')).toBe(false);
     expect(r.list().map((x) => x.id)).toEqual(['instant', 'watchtime']);
+  });
+
+  it('refuses a chat word on a streamer command, an invalid chat word and a duplicate chat word', () => {
+    const r = new KernelRegistry();
+    expect(() => r.register(fake('c1', 'c1_x', [], [{ type: 'go', label: 'Go', issuer: 'streamer', chat: { word: '!go' } }]))).toThrow(/issuer 'participant'/);
+    expect(() => r.register(fake('c2', 'c2_x', [], [{ type: 'go', label: 'Go', issuer: 'participant', chat: { word: 'x' } }]))).toThrow(/2 bis 32 Zeichen/);
+    expect(() => r.register(fake('c3', 'c3_x', [], [{ type: 'go', label: 'Go', issuer: 'participant', chat: { word: 'a b' } }]))).toThrow(/2 bis 32 Zeichen/);
+    expect(() =>
+      r.register(
+        fake('c4', 'c4_x', [], [
+          { type: 'go', label: 'Go', issuer: 'participant', chat: { word: '!buy' } },
+          { type: 'go2', label: 'Go 2', issuer: 'participant', chat: { word: '!BUY' } },
+        ]),
+      ),
+    ).toThrow(/doppelt/);
+    expect(['c1', 'c2', 'c3', 'c4'].some((id) => r.has(id))).toBe(false);
+    expect(() => r.register(fake('c5', 'c5_x', [], [{ type: 'go', label: 'Go', issuer: 'participant', chat: { word: '!buy' } }]))).not.toThrow();
   });
 
   it('refuses a kernel command type with a colon', () => {
