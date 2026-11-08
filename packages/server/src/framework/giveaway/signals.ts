@@ -5,13 +5,13 @@ import type pg from 'pg';
 import type { Queryable } from '../../db/pool.js';
 import type { SignalUser } from '../../ingest/signals.js';
 import type { NewEvent } from '../../journal/types.js';
-import { FRAMEWORK_EVENTS, type AnyKernel, type Pid } from '../../kernel-api/index.js';
-import { reject, type Rejection } from '../../shared/rejection.js';
+import { FRAMEWORK_EVENTS, type AnyKernel, type KernelCommandSpec, type KernelEvent, type Pid } from '../../kernel-api/index.js';
+import { isRejection, reject, type Rejection } from '../../shared/rejection.js';
 import type { CommandContext, CommandHandler } from '../command-bus.js';
 import { GIVEAWAY_NOT_FOUND, INVALID_ID, UUID_RE, loadGiveawayRow } from './authorize.js';
 import type { GiveawayDeps } from './lifecycle.js';
 import { MINUTE_RE, boostFactor } from './services.js';
-import { GIVEAWAY_EVENTS, giveawayStream, type GiveawayState } from './state.js';
+import { GIVEAWAY_EVENTS, fromKernelEvents, giveawayStream, type GiveawayState } from './state.js';
 
 export { MINUTE_RE } from './services.js';
 
@@ -92,14 +92,29 @@ export function planSignals(state: GiveawayState, kernel: AnyKernel, channel: Pi
   const registered = new Set(Object.keys(state.registered));
   const chat = [...p.chat].sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
 
-  // 1. Anmeldung per Keyword (6.4), mit denselben Regeln wie der Befehl register.
-  if (s.keyword !== null) {
-    for (const m of chat) {
-      if (registered.has(m.pid) || !keywordMatches(m.text, s.keyword)) continue;
-      if (kernel.gateRegistration?.(state.kernelState, s.config, m.at)) continue;
+  // 1. Chat in Zeitfolge: Anmeldung per Keyword (6.4, dieselben Regeln wie register) und Kern-Befehle (8.3, „!ticket <n>“).
+  // Der Kern-Zustand läuft mit jedem geplanten Ereignis mit, damit die zweite Nachricht die erste sieht.
+  const chatSpecs = kernel.commands.filter((c) => c.chat !== undefined && c.issuer === 'participant');
+  let kernelState = state.kernelState;
+  const pending = (e: NewEvent, at: string): KernelEvent => ({ id: '', type: e.type, payload: e.payload, at, reversesEventId: null });
+  const push = (e: NewEvent, at: string): void => {
+    events.push(e);
+    kernelState = kernel.reduce(kernelState, pending(e, at), s.config);
+  };
+  for (const m of chat) {
+    if (s.keyword !== null && keywordMatches(m.text, s.keyword)) {
+      if (registered.has(m.pid) || kernel.gateRegistration?.(kernelState, s.config, m.at)) continue;
       registered.add(m.pid);
-      events.push({ type: GIVEAWAY_EVENTS.registered, payload: { pid: m.pid } });
+      push({ type: GIVEAWAY_EVENTS.registered, payload: { pid: m.pid } }, m.at);
+      continue;
     }
+    if (chatSpecs.length === 0 || !kernel.decide) continue;
+    const c = chatCommandOf(m.text, chatSpecs);
+    if (c === null) continue;
+    // Eine Ablehnung verwirft die Nachricht still. Antworten im Chat kommen mit den Ansagen (Teilprojekt 8).
+    const out = kernel.decide(kernelState, { type: c.type, pid: m.pid, args: { count: c.count } }, s.config, m.at);
+    if (isRejection(out)) continue;
+    for (const e of fromKernelEvents(kernel, out)) push(e, m.at);
   }
 
   const eligible = (pid: Pid): boolean => s.counting === 'first_seen' || registered.has(pid);
@@ -146,6 +161,23 @@ const NOT_INGEST = (): Rejection => reject('not_ingest', 'Signale nimmt nur der 
 const NOT_OPEN = (): Rejection => reject('not_open', 'Das Giveaway sammelt gerade nicht. Signale gehen nur im Zustand Offen.');
 const INVALID_MINUTE = (): Rejection => reject('invalid_minute', 'Die Minute muss ein ISO-Zeitpunkt auf volle Minute sein.');
 const INVALID_SIGNALS = (): Rejection => reject('invalid_signals', 'Die Signale sind ungültig.');
+
+const COUNT_WORD_RE = /^\d{1,5}$/;
+
+/**
+ * Erstes Wort gleich dem Chat-Wort eines Kern-Befehls (Groß-/Kleinschreibung egal). Das zweite Wort ist count (ganze Zahl ≥ 1),
+ * fehlt es, gilt 1. Ein anderes zweites Wort macht die Nachricht zu keinem Befehl.
+ */
+export function chatCommandOf(text: string, specs: readonly KernelCommandSpec[]): { type: string; count: number } | null {
+  const [first = '', second] = text.trim().split(/\s+/);
+  if (first.length === 0) return null;
+  const spec = specs.find((c) => c.chat !== undefined && c.chat.word.toLowerCase() === first.toLowerCase());
+  if (!spec) return null;
+  if (second === undefined) return { type: spec.type, count: 1 };
+  if (!COUNT_WORD_RE.test(second)) return null;
+  const count = Number(second);
+  return count >= 1 ? { type: spec.type, count } : null;
+}
 
 /** Erstes Wort der Nachricht gleich Keyword, Groß-/Kleinschreibung egal. */
 export function keywordMatches(text: string, keyword: string): boolean {

@@ -1,13 +1,14 @@
 import type pg from 'pg';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { withTx } from '../src/db/pool.js';
-import { noActivity, type ApplySignalsCmd, type IdentityResolver } from '../src/framework/giveaway/signals.js';
+import { chatCommandOf, noActivity, type ApplySignalsCmd, type IdentityResolver } from '../src/framework/giveaway/signals.js';
 import { FRAMEWORK_EVENTS } from '../src/kernel-api/index.js';
 import { findIdentity, upsertIdentity } from '../src/identity/identities.js';
 import { identityResolver } from '../src/identity/resolver.js';
 import { minuteOf } from '../src/ingest/bundler.js';
 import type { SignalUser } from '../src/ingest/signals.js';
 import type { WatchtimeState } from '../src/kernels/watchtime/index.js';
+import { TICKETS_EVENTS, ticketsKernel, type TicketsState } from '../src/kernels/tickets/index.js';
 import { AT, freshDb } from './helpers/db.js';
 import { GID, P1, P2, P3, STREAMER, createOpen, must, run, setupGiveaway, state, userOf } from './helpers/giveaway.js';
 
@@ -26,6 +27,7 @@ const at = (sec: number) => new Date(AT.getTime() + sec * 1000);
 const iso = (sec: number) => at(sec).toISOString();
 const MINUTE = minuteOf(AT);
 const MINUTE2 = minuteOf(at(60));
+const MINUTE3 = minuteOf(at(120));
 
 type Stub = IdentityResolver & { resolve: ReturnType<typeof vi.fn>; create: ReturnType<typeof vi.fn>; touch: ReturnType<typeof vi.fn> };
 
@@ -260,5 +262,95 @@ describe('apply_signals', () => {
     expect((await findIdentity(db.pool, P2))!.lastSeenAt).toEqual(AT);
     await r.touch(db.pool, [P2], at(60));
     expect((await findIdentity(db.pool, P2))!.lastSeenAt).toEqual(AT);
+  });
+});
+
+/** Offenes Ticket-Giveaway mit Coin-Basis 60 s und Keyword !go. Zählweise wie übergeben (Default: ab Anmeldung). */
+async function setupTickets(settings: Record<string, unknown> = {}) {
+  const identities = stubResolver();
+  const s = await setupGiveaway({ identities });
+  close = s.close;
+  await createOpen(s.rt, { kernelId: 'tickets', settings: { prize: 'Key', channels: [P1], config: { coinBaseSec: 60 }, keyword: '!go', ...settings } });
+  return { ...s, identities };
+}
+const ticketsOf = async (rt: Awaited<ReturnType<typeof setupTickets>>['rt']) => ((await state(rt)).kernelState as TicketsState).tickets;
+
+describe('apply_signals: Chat-Befehle der Kerne', () => {
+  const specs = ticketsKernel.commands;
+
+  it('chatCommandOf parses word and count', () => {
+    expect(chatCommandOf('!ticket', specs)).toEqual({ type: 'buy_tickets', count: 1 });
+    expect(chatCommandOf('!TICKET 3', specs)).toEqual({ type: 'buy_tickets', count: 3 });
+    expect(chatCommandOf('  !ticket   2  ', specs)).toEqual({ type: 'buy_tickets', count: 2 });
+    expect(chatCommandOf('!ticket 0', specs)).toBeNull();
+    expect(chatCommandOf('!ticket x', specs)).toBeNull();
+    expect(chatCommandOf('!ticket 123456', specs)).toBeNull();
+    expect(chatCommandOf('ticket 2', specs)).toBeNull();
+    expect(chatCommandOf('!ticket 2', [])).toBeNull();
+  });
+
+  it('!ticket buys with coins from an earlier minute', async () => {
+    const s = await setupTickets();
+    await must(s.rt, s.rt.handlers.register, { giveawayId: GID, pid: P2 }, { actor: userOf(P2) });
+    await must(s.rt, s.rt.handlers.applySignals, signals({ presence: [ALICE] }), INGEST);
+    const events = await must(s.rt, s.rt.handlers.applySignals, signals({ minute: MINUTE2, presence: null, chat: [chatMsg(ALICE, '!ticket 1', 60)] }), INGEST);
+    expect(events.map((e) => [e.type, e.payload, e.actor])).toEqual([[TICKETS_EVENTS.bought, { pid: P2, count: 1, coins: 1 }, 'system:ingest']]);
+    expect(await ticketsOf(s.rt)).toEqual({ [P2]: 1 });
+  });
+
+  it('two !ticket messages in one minute: the second sees the first', async () => {
+    const s = await setupTickets();
+    await must(s.rt, s.rt.handlers.register, { giveawayId: GID, pid: P2 }, { actor: userOf(P2) });
+    await must(s.rt, s.rt.handlers.correctWatch, { giveawayId: GID, channel: P1, pid: P2, sec: 120, reason: 'Test' });
+    const events = await must(
+      s.rt,
+      s.rt.handlers.applySignals,
+      signals({ minute: MINUTE2, presence: null, chat: [chatMsg(ALICE, '!ticket 2', 62), chatMsg(ALICE, '!ticket 1', 60), chatMsg(ALICE, '!ticket 1', 61)] }),
+      INGEST,
+    );
+    // Zeitfolge: 60 kauft 1 (1 Coin bleibt), 61 kauft 1 (0 bleiben), 62 will 2 und fällt weg.
+    expect(events.map((e) => [e.type, e.payload])).toEqual([
+      [TICKETS_EVENTS.bought, { pid: P2, count: 1, coins: 1 }],
+      [TICKETS_EVENTS.bought, { pid: P2, count: 1, coins: 1 }],
+    ]);
+    expect(await ticketsOf(s.rt)).toEqual({ [P2]: 2 });
+  });
+
+  it('unregistered or unknown writer: no event, no identity created', async () => {
+    const s = await setupTickets();
+    await must(s.rt, s.rt.handlers.correctWatch, { giveawayId: GID, channel: P1, pid: P3, sec: 300, reason: 'Test' });
+    const events = await must(s.rt, s.rt.handlers.applySignals, signals({ presence: null, chat: [chatMsg(BOB, '!ticket 1', 1), chatMsg(GHOST, '!ticket 1', 2)] }), INGEST);
+    expect(events).toEqual([]);
+    expect(s.identities.create).not.toHaveBeenCalled();
+    expect(await ticketsOf(s.rt)).toEqual({});
+  });
+
+  it('keyword then !ticket in the same minute (first_seen): registered, then bought', async () => {
+    const s = await setupTickets({ counting: 'first_seen' });
+    await must(s.rt, s.rt.handlers.applySignals, signals({ presence: [GHOST] }), INGEST);
+    expect(s.identities.create).toHaveBeenCalledOnce();
+    const events = await must(s.rt, s.rt.handlers.applySignals, signals({ minute: MINUTE2, presence: null, chat: [chatMsg(GHOST, '!go', 60), chatMsg(GHOST, '!ticket 1', 61)] }), INGEST);
+    expect(events.map((e) => [e.type, e.payload])).toEqual([
+      [FRAMEWORK_EVENTS.registered, { pid: PG }],
+      [TICKETS_EVENTS.bought, { pid: PG, count: 1, coins: 1 }],
+    ]);
+    expect(await ticketsOf(s.rt)).toEqual({ [PG]: 1 });
+  });
+
+  it('watch_credited of the same minute is still written after the purchase and does not fund it', async () => {
+    const s = await setupTickets();
+    await must(s.rt, s.rt.handlers.register, { giveawayId: GID, pid: P2 }, { actor: userOf(P2) });
+    await must(s.rt, s.rt.handlers.applySignals, signals({ presence: [ALICE] }), INGEST);
+    const second = await must(s.rt, s.rt.handlers.applySignals, signals({ minute: MINUTE2, presence: [ALICE], chat: [chatMsg(ALICE, '!ticket 2', 60)] }), INGEST);
+    expect(types(second)).toEqual([FRAMEWORK_EVENTS.watchCredited]);
+    const third = await must(s.rt, s.rt.handlers.applySignals, signals({ minute: MINUTE3, presence: null, chat: [chatMsg(ALICE, '!ticket 2', 120)] }), INGEST);
+    expect(third.map((e) => [e.type, e.payload])).toEqual([[TICKETS_EVENTS.bought, { pid: P2, count: 2, coins: 2 }]]);
+  });
+
+  it('a kernel without chat commands ignores !ticket', async () => {
+    const s = await setup();
+    await must(s.rt, s.rt.handlers.register, { giveawayId: GID, pid: P2 }, { actor: userOf(P2) });
+    const events = await must(s.rt, s.rt.handlers.applySignals, signals({ presence: null, chat: [chatMsg(ALICE, '!ticket 1', 1)] }), INGEST);
+    expect(events).toEqual([]);
   });
 });
