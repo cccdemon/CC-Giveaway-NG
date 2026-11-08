@@ -1,12 +1,11 @@
 // Kern-Befehle über kernel.decide (NEW_DESIGN.md 4, 7.1). Der Rahmen prüft Rechte und Zustand, der Kern entscheidet.
 import type pg from 'pg';
 import type { KernelCommand } from '../../kernel-api/index.js';
-import type { NewEvent } from '../../journal/types.js';
 import { isRejection, reject, type Rejection } from '../../shared/rejection.js';
 import type { CommandContext, CommandHandler } from '../command-bus.js';
 import { GIVEAWAY_NOT_FOUND, authorizeSelf, loadGiveawayRow } from './authorize.js';
 import type { GiveawayDeps } from './lifecycle.js';
-import { giveawayStream, type GiveawayState } from './state.js';
+import { fromKernelEvents, giveawayStream, type GiveawayState } from './state.js';
 
 export interface KernelCommandCmd {
   giveawayId: string;
@@ -44,12 +43,7 @@ export function kernelCommandHandler(d: GiveawayDeps): CommandHandler<KernelComm
       if (!kernel.decide) return UNKNOWN_COMMAND(kernel.label);
       const out = kernel.decide(state.kernelState, cmd.command, state.settings.config, ctx.now.toISOString());
       if (isRejection(out)) return out;
-      return out.map((e): NewEvent => {
-        if (!e.type.startsWith(`${kernel.id}_`)) {
-          throw new Error(`Der Kern ${kernel.id} hat ein fremdes Ereignis erzeugt: ${e.type}`);
-        }
-        return { type: e.type, payload: e.payload };
-      });
+      return fromKernelEvents(kernel, out);
     },
   };
 }

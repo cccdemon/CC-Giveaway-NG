@@ -14,6 +14,7 @@ import { KEYWORD_RE, PURGE_DAYS_MAX, PURGE_DAYS_MIN, SERVICE_DEFAULTS, chatBonus
 import {
   GIVEAWAY_EVENTS,
   TRANSITIONS,
+  fromKernelEvents,
   giveawayStream,
   type GiveawaySettings,
   type GiveawayState,
@@ -112,6 +113,10 @@ function checkSettings(kernel: AnyKernel, s: GiveawaySettings): GiveawaySettings
   if (s.keyword !== null && (typeof s.keyword !== 'string' || !KEYWORD_RE.test(s.keyword))) {
     return reject('invalid_keyword', 'Das Keyword ist ein Wort mit 2 bis 32 Zeichen ohne Leerzeichen.');
   }
+  // Sonst hieße dasselbe Wort zugleich Anmeldung und Kern-Befehl (Teilprojekt 6, Festlegung 6).
+  if (s.keyword !== null && kernel.commands.some((c) => c.chat?.word.toLowerCase() === s.keyword!.toLowerCase())) {
+    return reject('keyword_reserved', 'Dieses Wort ist ein Chat-Befehl des Kerns. Wähle ein anderes Keyword.');
+  }
   if (!chatBonusSchema.safeParse(s.chatBonus).success) return reject('invalid_chat_bonus', 'Die Chat-Bonus-Regeln sind ungültig.');
   if (!Array.isArray(s.gates)) return INVALID_GATE();
   const gates: GateConfig[] = [];
@@ -189,7 +194,11 @@ export function transitionHandler(d: GiveawayDeps, type: TransitionType): Comman
       if (type === 'complete_giveaway' && !Object.values(state.winners).every((w) => w === 'done' || w === 'forfeited')) {
         return reject('winners_open', 'Setze jeden Gewinn auf erledigt oder verfallen, bevor du abschließt.');
       }
-      return [{ type: GIVEAWAY_EVENTS.statusChanged, payload: { from, to: spec.to } }];
+      const changed = { type: GIVEAWAY_EVENTS.statusChanged, payload: { from, to: spec.to } };
+      if (type !== 'cancel_giveaway') return [changed];
+      // Abbruch: der Kern darf nachbuchen, Kern C erstattet alle Tickets (§7.1).
+      const kernel = d.kernels.get(state.kernelId);
+      return [changed, ...fromKernelEvents(kernel, kernel.onCancel?.(state.kernelState, state.settings.config) ?? [])];
     },
   };
 }
@@ -256,6 +265,8 @@ const REVERT_GATES: Record<string, { allowed: readonly GiveawayStatus[]; rejecti
   },
 };
 
+const KERNEL_REVERT_OPEN: readonly GiveawayStatus[] = ['draft', 'open', 'paused', 'closed'];
+
 export function giveawayRevertHandler(
   d: GiveawayDeps,
   registry: EventTypeRegistry,
@@ -269,6 +280,13 @@ export function giveawayRevertHandler(
   return {
     ...base,
     decide(state, cmd, ctx, prepared) {
+      // Kern-Einträge nur bis Geschlossen: sonst veränderte eine Umkehrung den Topf einer Ersatzziehung (Teilprojekt 6, Festlegung 8).
+      if (prepared.target && state.exists && !KERNEL_REVERT_OPEN.includes(state.status)) {
+        const kernel = d.kernels.get(state.kernelId);
+        if (kernel.events.some((e) => e.type === prepared.target!.type)) {
+          return reject('kernel_locked', 'Nach der Ziehung änderst du keine Kern-Einträge mehr.');
+        }
+      }
       const out = base.decide(state, cmd, ctx, prepared);
       const gate = prepared.target ? REVERT_GATES[prepared.target.type] : undefined;
       if (!isRejection(out) && gate && !gate.allowed.includes(state.status)) return gate.rejection();

@@ -1,6 +1,6 @@
 // Zustand des Stroms giveaway:<id>. Rahmen-Felder hier, Kern-Zustand über kernel.reduce (F7). Rein und unveränderlich.
-import { FRAMEWORK_EVENTS, SERVICE_EVENTS, type CreditedPayload, type KernelEvent, type Pid } from '../../kernel-api/index.js';
-import type { EventRecord, StreamId } from '../../journal/types.js';
+import { FRAMEWORK_EVENTS, SERVICE_EVENTS, type AnyKernel, type CreditedPayload, type KernelEvent, type NewKernelEvent, type Pid } from '../../kernel-api/index.js';
+import type { EventRecord, NewEvent, StreamId } from '../../journal/types.js';
 import type { StreamReducer } from '../command-bus.js';
 import type { KernelRegistry } from '../kernel-registry.js';
 import type { FrozenLegal, LegalTexts } from '../legal.js';
@@ -87,6 +87,16 @@ export function giveawayStream(id: string): StreamId {
 
 export function toKernelEvent(e: EventRecord): KernelEvent {
   return { id: e.id, type: e.type, payload: e.payload, at: e.createdAt.toISOString(), reversesEventId: e.reversesEventId };
+}
+
+/** Ereignisse aus kernel.decide oder kernel.onCancel für das Journal. Ein Kern schreibt nur Typen mit seinem Präfix (§4). */
+export function fromKernelEvents(kernel: AnyKernel, out: NewKernelEvent[]): NewEvent[] {
+  return out.map((e): NewEvent => {
+    if (!e.type.startsWith(`${kernel.id}_`)) {
+      throw new Error(`Der Kern ${kernel.id} hat ein fremdes Ereignis erzeugt: ${e.type}`);
+    }
+    return { type: e.type, payload: e.payload };
+  });
 }
 
 interface CreatedPayload {

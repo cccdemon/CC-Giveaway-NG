@@ -243,4 +243,14 @@ describe('Lebenszyklus', () => {
     expect(s.settings.config).toEqual({ windowSec: 300 });
     expect(s.settings.prize).toBe('Neu');
   });
+  it('create and change_settings reject a keyword equal to a chat command word of the kernel', async () => {
+    const { rt } = await setup();
+    expect(await code(run(rt, rt.handlers.create, createCmd({ kernelId: 'tickets' }, { keyword: '!TICKET' })))).toBe('keyword_reserved');
+    await must(rt, rt.handlers.create, createCmd({ kernelId: 'tickets' }));
+    expect(await run(rt, rt.handlers.changeSettings, { giveawayId: GID, settings: { keyword: '!ticket' } })).toEqual({
+      ok: false,
+      rejection: { rejected: true, code: 'keyword_reserved', message: 'Dieses Wort ist ein Chat-Befehl des Kerns. Wähle ein anderes Keyword.' },
+    });
+    expect(await code(run(rt, rt.handlers.changeSettings, { giveawayId: GID, settings: { keyword: '!go' } }))).toBe('ok');
+  });
 });
