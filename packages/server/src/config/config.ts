@@ -24,6 +24,7 @@ const schema = z.object({
   TWITCH_BOT_USER_ID: z.string().default(''),
   INGEST_SIM_VIEWERS: z.coerce.number({ message: 'Keine Zahl.' }).int({ message: SIM_MSG }).min(1, { message: SIM_MSG }).max(5000, { message: SIM_MSG }).default(20),
   INGEST_SIM_SEED: z.coerce.number({ message: 'Keine Zahl.' }).int({ message: 'Erlaubt ist eine ganze Zahl.' }).default(1),
+  ADMIN_TWITCH_IDS: z.string().default(''),
 });
 
 export interface Config {
@@ -46,6 +47,8 @@ export interface Config {
   twitchBotUserId: string;
   ingestSimViewers: number;
   ingestSimSeed: number;
+  /** Twitch-IDs der Superadmins (NEW_DESIGN.md 11.4), kommagetrennt. Leer = niemand. */
+  adminTwitchIds: string[];
 }
 
 export class ConfigError extends Error {
@@ -80,5 +83,6 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
     twitchBotUserId: v.TWITCH_BOT_USER_ID,
     ingestSimViewers: v.INGEST_SIM_VIEWERS,
     ingestSimSeed: v.INGEST_SIM_SEED,
+    adminTwitchIds: v.ADMIN_TWITCH_IDS.split(',').map((x) => x.trim()).filter((x) => x !== ''),
   };
 }

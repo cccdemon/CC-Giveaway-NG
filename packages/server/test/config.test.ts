@@ -37,6 +37,7 @@ describe('loadConfig', () => {
       twitchBotUserId: '',
       ingestSimViewers: 20,
       ingestSimSeed: 1,
+      adminTwitchIds: [],
     });
   });
 
@@ -92,5 +93,12 @@ describe('loadConfig', () => {
   it('gives German, actionable message for PORT range', () => {
     const text = problemsOf({ ...valid, PORT: '70000' }).join('\n');
     expect(text).toMatch(/ganze Zahl von 1 bis 65535/);
+  });
+});
+
+describe('loadConfig: ADMIN_TWITCH_IDS (Teilprojekt 8c)', () => {
+  it('parses ADMIN_TWITCH_IDS into a trimmed list, default empty', () => {
+    expect(loadConfig(valid).adminTwitchIds).toEqual([]);
+    expect(loadConfig({ ...valid, ADMIN_TWITCH_IDS: ' 12345, 67890 ,,' }).adminTwitchIds).toEqual(['12345', '67890']);
   });
 });
