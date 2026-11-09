@@ -4,7 +4,7 @@ import type { Me } from '#lib/api/types.js';
 import { L } from '#lib/texts/labels.js';
 import Page from './+page.svelte';
 
-const me: Me = { pid: 'a1', login: 'alice', displayName: 'Alice', soloTeamId: 's', termsVersion: 1, currentTermsVersion: 1, channelConnected: false, legal: { impressumUrl: null, terms: null, privacyUrl: null } };
+const me: Me = { pid: 'a1', login: 'alice', displayName: 'Alice', soloTeamId: 's', termsVersion: 1, currentTermsVersion: 1, channelConnected: false, legal: { impressumUrl: null, terms: null, privacyUrl: null } , admin: false, banned: null, warnings: [] };
 
 describe('Meine Daten', () => {
   afterEach(() => vi.restoreAllMocks());

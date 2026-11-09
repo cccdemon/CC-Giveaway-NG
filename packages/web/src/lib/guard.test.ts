@@ -1,9 +1,9 @@
-import { isRedirect } from '@sveltejs/kit';
+import { isHttpError, isRedirect } from '@sveltejs/kit';
 import { describe, expect, it } from 'vitest';
 import type { Me } from './api/types.js';
-import { requireSession, requireStreamer } from './guard.js';
+import { requireAdmin, requireSession, requireStreamer } from './guard.js';
 
-const me: Me = { pid: 'p', login: 'alice', displayName: 'Alice', soloTeamId: 't', termsVersion: 1, currentTermsVersion: 1, channelConnected: true, legal: { impressumUrl: null, terms: null, privacyUrl: null } };
+const me: Me = { pid: 'p', login: 'alice', displayName: 'Alice', soloTeamId: 't', termsVersion: 1, currentTermsVersion: 1, channelConnected: true, legal: { impressumUrl: null, terms: null, privacyUrl: null }, admin: false, banned: null, warnings: [] };
 const url = new URL('https://g.example/giveaways?status=open');
 
 const thrown = (fn: () => unknown): unknown => {
@@ -28,5 +28,13 @@ describe('guard', () => {
   it('requireSession only asks for a session', () => {
     expect(requireSession({ ...me, termsVersion: 0 }, url)).toMatchObject({ pid: 'p' });
     expect(isRedirect(thrown(() => requireSession(null, url)))).toBe(true);
+  });
+
+  it('requireAdmin redirects without session, throws 403 for a non-admin, passes an admin', () => {
+    expect(isRedirect(thrown(() => requireAdmin(null, url)))).toBe(true);
+    const forbidden = thrown(() => requireAdmin(me, url));
+    expect(isHttpError(forbidden)).toBe(true);
+    expect(forbidden).toMatchObject({ status: 403 });
+    expect(requireAdmin({ ...me, admin: true }, url)).toMatchObject({ admin: true });
   });
 });

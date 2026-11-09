@@ -5,7 +5,7 @@ import { L } from '#lib/texts/labels.js';
 import Page from './+page.svelte';
 import { load } from './+page.js';
 
-const me: Me = { pid: 'a1a1a1a1-0000-4000-8000-000000000001', login: 'alice', displayName: 'Alice', soloTeamId: 'solo-1', termsVersion: 1, currentTermsVersion: 1, channelConnected: true, legal: { impressumUrl: null, terms: null, privacyUrl: null } };
+const me: Me = { pid: 'a1a1a1a1-0000-4000-8000-000000000001', login: 'alice', displayName: 'Alice', soloTeamId: 'solo-1', termsVersion: 1, currentTermsVersion: 1, channelConnected: true, legal: { impressumUrl: null, terms: null, privacyUrl: null } , admin: false, banned: null, warnings: [] };
 
 function detailOf(): GiveawayDetail {
   return {

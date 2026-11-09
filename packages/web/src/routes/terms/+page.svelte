@@ -8,11 +8,11 @@
 
   let { data }: PageProps = $props();
   const action = new Action();
-  const current = $derived(data.me.termsVersion >= data.me.currentTermsVersion);
+  const current = $derived(data.me.termsVersion >= data.terms.version);
 
   const accept = () =>
     action.run(
-      (api) => api.post('/api/me/terms', { version: data.me.currentTermsVersion }),
+      (api) => api.post('/api/me/terms', { version: data.terms.version }),
       async () => {
         await invalidate('api:me');
         await goto(data.ret);
@@ -23,14 +23,18 @@
 <svelte:head><title>{L.terms.title} · {L.brand}</title></svelte:head>
 
 <section class="stack narrow">
-  <span class="lbl">{L.terms.version(data.me.currentTermsVersion)}</span>
+  <span class="lbl">{L.terms.version(data.terms.version)}</span>
   <h1>{L.terms.title}</h1>
   <p>{S.terms.intro}</p>
-  <ul>
-    {#each S.terms.duties as duty (duty)}
-      <li>{duty}</li>
-    {/each}
-  </ul>
+  {#if data.terms.text}
+    <pre class="terms">{data.terms.text}</pre>
+  {:else}
+    <ul>
+      {#each S.terms.duties as duty (duty)}
+        <li>{duty}</li>
+      {/each}
+    </ul>
+  {/if}
   {#if current}
     <p class="tone-ok">{S.terms.accepted(data.me.termsVersion)}</p>
     <a class="btn" href={data.ret}>{L.actions.toOverview}</a>
@@ -47,6 +51,15 @@
   .narrow {
     max-width: 720px;
     gap: 16px;
+  }
+  .terms {
+    white-space: pre-wrap;
+    font-family: var(--font-text);
+    border: 1px solid var(--border);
+    padding: 14px 18px;
+    margin: 0;
+    max-height: 60vh;
+    overflow: auto;
   }
   ul {
     margin: 0;

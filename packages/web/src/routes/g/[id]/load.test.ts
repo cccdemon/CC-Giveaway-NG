@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { Me } from '#lib/api/types.js';
 import { load } from './+page.js';
 
-const me: Me = { pid: 'a1', login: 'alice', displayName: 'Alice', soloTeamId: 's', termsVersion: 1, currentTermsVersion: 1, channelConnected: false, legal: { impressumUrl: null, terms: null, privacyUrl: null } };
+const me: Me = { pid: 'a1', login: 'alice', displayName: 'Alice', soloTeamId: 's', termsVersion: 1, currentTermsVersion: 1, channelConnected: false, legal: { impressumUrl: null, terms: null, privacyUrl: null } , admin: false, banned: null, warnings: [] };
 const GID = '66666666-6666-4666-8666-666666666661';
 const pub = { id: GID, prize: 'Key', sponsor: null, kernel: { id: 'instant', label: 'Sofortverlosung', display: {}, commands: [] }, status: 'paused', channels: [], keyword: null, legal: null, claimDays: 14, counting: 'registered', winnersCount: 1 };
 

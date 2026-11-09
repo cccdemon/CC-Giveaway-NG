@@ -1,5 +1,7 @@
 <script lang="ts">
   import ChannelStatus from '#lib/components/ChannelStatus.svelte';
+  import Panel from '#lib/components/Panel.svelte';
+  import { dateTime } from '#lib/format.js';
   import Tile from '#lib/components/Tile.svelte';
   import { watchStreams } from '#lib/live.js';
   import { L } from '#lib/texts/labels.js';
@@ -24,8 +26,23 @@
     <span class="lbl">{data.me?.displayName} · {teamLine}</span>
     <h1>{L.nav.overview}</h1>
   </div>
-  <a class="btn btn-primary" href="/giveaways/new">{L.actions.start}</a>
+  {#if data.me?.banned}
+    <span class="btn btn-primary" aria-disabled="true">{L.actions.start}</span>
+  {:else}
+    <a class="btn btn-primary" href="/giveaways/new">{L.actions.start}</a>
+  {/if}
 </section>
+
+{#if data.me?.banned}
+  <Panel tone="error" alert>
+    <span>{S.account.banned(data.me.banned.reason)}</span>
+  </Panel>
+{/if}
+{#each data.me?.warnings ?? [] as w (w.eventId)}
+  <Panel tone="warn" alert>
+    <span>{S.account.warned(dateTime(w.at), w.reason)}</span>
+  </Panel>
+{/each}
 
 <section class="panel" aria-label={L.columns.connection}>
   <div class="panel-body">

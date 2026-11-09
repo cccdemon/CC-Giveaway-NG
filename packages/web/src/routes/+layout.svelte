@@ -49,6 +49,9 @@
         {#each NAV as item (item.href)}
           <a href={item.href} class:active={isActive(item.href)} aria-current={isActive(item.href) ? 'page' : undefined}>{item.label}</a>
         {/each}
+        {#if data.me.admin}
+          <a href="/admin" class:active={isActive('/admin')} aria-current={isActive('/admin') ? 'page' : undefined}>{L.nav.admin}</a>
+        {/if}
       </nav>
       <div class="tools">
         <label class="toggle" title={L.streamerMode}>
@@ -86,6 +89,12 @@
 <main class="main">
   {@render children()}
 </main>
+
+{#if data.me}
+  <footer class="foot">
+    <a href="/feedback" class="hint">{L.nav.feedback}</a>
+  </footer>
+{/if}
 
 <style>
   .top {
@@ -145,6 +154,11 @@
   }
   .who {
     font-size: 0.875rem;
+  }
+  .foot {
+    max-width: 1440px;
+    margin: 0 auto;
+    padding: 0 16px 24px;
   }
   .main {
     max-width: 1440px;

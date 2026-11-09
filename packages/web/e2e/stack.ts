@@ -15,6 +15,8 @@ import { pgBanDirectory, pgTeamDirectory } from '../../server/src/identity/team-
 import { REQUIRED_CHANNEL_SCOPES, type TwitchAuthClient } from '../../server/src/identity/twitch.js';
 import type { TwitchUser } from '../../server/src/identity/identities.js';
 import { ensurePartitions } from '../../server/src/journal/partitions.js';
+import { twitchIdAdmins } from '../../server/src/platform/admin.js';
+import { attachPlatform } from '../../server/src/platform/runtime.js';
 
 const API_PORT = Number(process.env.E2E_API_PORT ?? 3100);
 const WEB_URL = process.env.E2E_WEB_URL ?? 'http://localhost:3101';
@@ -53,7 +55,10 @@ async function main() {
     log,
   });
   const accounts = attachAccounts(rt, { tokenKey: randomBytes(32) });
-  const app = buildApp({ pool, api: { rt, accounts, auth: accountAuthorizer(), subscriber: bus, twitch, publicUrl: WEB_URL, secureCookies: false } });
+  // Alice (1001) ist im E2E Superadmin.
+  const admins = twitchIdAdmins(['1001']);
+  const platform = attachPlatform(rt, { admins });
+  const app = buildApp({ pool, api: { rt, accounts, platform, admins, auth: accountAuthorizer(), subscriber: bus, twitch, publicUrl: WEB_URL, secureCookies: false } });
   app.post<{ Body: Partial<TwitchUser> }>('/__e2e/user', async (req) => {
     const b = req.body ?? {};
     current = { id: String(b.id ?? current.id), login: String(b.login ?? current.login), displayName: String(b.displayName ?? current.displayName) };

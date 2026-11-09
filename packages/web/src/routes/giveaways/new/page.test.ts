@@ -13,6 +13,9 @@ const me: Me = {
   currentTermsVersion: 1,
   channelConnected: true,
   legal: { impressumUrl: 'https://x/i', terms: { text: 'Regeln.' }, privacyUrl: 'https://x/p' },
+  admin: false,
+  banned: null,
+  warnings: [],
 };
 const instant: KernelInfo = {
   id: 'instant',

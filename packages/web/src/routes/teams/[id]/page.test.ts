@@ -4,7 +4,7 @@ import type { Me, TeamDetail } from '#lib/api/types.js';
 import { streamerMode } from '#lib/mask.js';
 import Page from './+page.svelte';
 
-const me: Me = { pid: 'a1', login: 'alice', displayName: 'Alice', soloTeamId: 's', termsVersion: 1, currentTermsVersion: 1, channelConnected: true, legal: { impressumUrl: null, terms: null, privacyUrl: null } };
+const me: Me = { pid: 'a1', login: 'alice', displayName: 'Alice', soloTeamId: 's', termsVersion: 1, currentTermsVersion: 1, channelConnected: true, legal: { impressumUrl: null, terms: null, privacyUrl: null } , admin: false, banned: null, warnings: [] };
 const team: TeamDetail = {
   teamId: 't1',
   name: 'Nordlicht',

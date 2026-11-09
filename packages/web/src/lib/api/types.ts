@@ -36,6 +36,51 @@ export interface Me {
   currentTermsVersion: number;
   channelConnected: boolean;
   legal: LegalTexts;
+  /** Superadmin (ADMIN_TWITCH_IDS). */
+  admin: boolean;
+  /** Plattform-Sperre als Streamer (NEW_DESIGN.md 11.4), null ohne. */
+  banned: { reason: string; since: string } | null;
+  warnings: PlatformWarning[];
+}
+
+export interface PlatformWarning {
+  eventId: string;
+  reason: string;
+  at: string;
+}
+
+export interface Terms {
+  version: number;
+  text: string | null;
+  publishedAt: string | null;
+}
+
+export interface OpsView {
+  db: 'ok';
+  workers: { worker: number; channels: number; lastUpdate: string }[];
+  channels: NamedChannelStatus[];
+  giveaways: Record<GiveawayStatus, number>;
+  denied: { action: string; reason: string; count: number; lastAt: string }[];
+  browserErrors: { at: string; message: string; url: string | null }[];
+}
+
+export interface AdminStreamer {
+  pid: string;
+  login: string;
+  displayName: string;
+  channelConnected: boolean;
+  termsVersion: number;
+  banned: { reason: string; since: string } | null;
+  warnings: PlatformWarning[];
+}
+
+export interface FeedbackRow {
+  id: number;
+  pid: string;
+  displayName: string;
+  text: string;
+  at: string;
+  done: boolean;
 }
 
 export type ConfigField =
