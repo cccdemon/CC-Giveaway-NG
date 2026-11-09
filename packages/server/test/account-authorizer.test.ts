@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { CommandResult } from '../src/framework/command-bus.js';
-import { accountAuthorizer } from '../src/identity/account/authorizer.js';
+import { accountAuthorizer, accountTeamAuthorizer } from '../src/identity/account/authorizer.js';
 import { attachAccounts } from '../src/identity/runtime.js';
 import { PLATFORM_TERMS_VERSION } from '../src/identity/terms.js';
 import { REQUIRED_CHANNEL_SCOPES } from '../src/identity/twitch.js';
@@ -70,6 +70,69 @@ describe('accountAuthorizer', () => {
     const { rt } = await setup();
     expect(codeOf(await create(rt, 'system:scheduler', OTHER_TEAM))).toBe('ok');
     expect(codeOf(await create(rt, 'system:migration', OTHER_TEAM, '66666666-6666-4666-8666-666666666667'))).toBe('ok');
+  });
+
+  it('a member of a real team controls its giveaways, a non-member gets not_your_team, a deactivated team keeps control', async () => {
+    const { rt, accounts, pool } = await setup();
+    const BOB_PID = '88888888-8888-4888-8888-888888888888';
+    const CAROL_PID = '99999999-9999-4999-8999-999999999999';
+    const complete = async (pid: string, solo: string, user: { id: string; login: string; displayName: string }) => {
+      const actor = `user:${pid}`;
+      await must(rt.bus.execute(accounts.signIn, { pid, soloTeamId: solo, user }, ctx({ actor: 'system:twitch' })));
+      await must(rt.bus.execute(accounts.acceptTerms, { pid, version: PLATFORM_TERMS_VERSION }, ctx({ actor })));
+      await must(rt.bus.execute(accounts.connectChannel, { pid, twitchId: user.id, token }, ctx({ actor })));
+      return actor;
+    };
+    const alice = await complete(PID, SOLO, ALICE);
+    const bob = await complete(BOB_PID, '55555555-5555-4555-8555-555555555557', { id: '67890', login: 'bob', displayName: 'Bob' });
+    const carol = await complete(CAROL_PID, '55555555-5555-4555-8555-555555555558', { id: '13579', login: 'carol', displayName: 'Carol' });
+    const INVITE = '11111111-1111-4111-8111-111111111111';
+    await must(rt.bus.execute(rt.teams.create, { teamId: OTHER_TEAM, name: 'Werwölfe' }, ctx({ actor: alice })));
+    await must(rt.bus.execute(rt.teams.createInvite, { teamId: OTHER_TEAM, inviteId: INVITE }, ctx({ actor: alice })));
+    await must(rt.bus.execute(rt.teams.join, { teamId: OTHER_TEAM, inviteId: INVITE, pid: BOB_PID }, ctx({ actor: bob })));
+    expect(codeOf(await create(rt, alice, OTHER_TEAM))).toBe('ok');
+    expect(codeOf(await rt.bus.execute(rt.handlers.open, { giveawayId: GID }, ctx({ actor: bob })))).toBe('ok');
+    expect(codeOf(await rt.bus.execute(rt.handlers.pause, { giveawayId: GID }, ctx({ actor: bob })))).toBe('ok');
+    expect(await create(rt, carol, OTHER_TEAM, '66666666-6666-4666-8666-666666666667')).toMatchObject({
+      ok: false,
+      rejection: { code: 'not_your_team', message: 'Dieses Giveaway gehört nicht zu deinem Team.' },
+    });
+    await must(rt.bus.execute(rt.teams.deactivate, { teamId: OTHER_TEAM }, ctx({ actor: bob })));
+    expect((await pool.query('SELECT active FROM teams WHERE id = $1', [OTHER_TEAM])).rows[0]!.active).toBe(false);
+    expect(codeOf(await rt.bus.execute(rt.handlers.close, { giveawayId: GID }, ctx({ actor: bob })))).toBe('ok');
+    // Austritt nimmt die Rechte: BOB verlässt, danach ist Alice allein.
+    await must(rt.bus.execute(rt.teams.leave, { teamId: OTHER_TEAM, pid: BOB_PID }, ctx({ actor: bob })));
+    expect(codeOf(await rt.bus.execute(rt.handlers.reopen, { giveawayId: GID }, ctx({ actor: bob })))).toBe('not_your_team');
+    expect(codeOf(await rt.bus.execute(rt.handlers.reopen, { giveawayId: GID }, ctx({ actor: alice })))).toBe('ok');
+  });
+
+  it('accountTeamAuthorizer: canFound needs account, terms and channel; isMember needs a team_members row; a deleted account loses both', async () => {
+    const { rt, accounts, pool } = await setup();
+    const auth = accountTeamAuthorizer();
+    const me = `user:${PID}`;
+    const c = await pool.connect();
+    try {
+      const codeOrOk = (r: Awaited<ReturnType<typeof auth.canFound>>) => (r === null ? 'ok' : r.code);
+      expect(codeOrOk(await auth.canFound(c, me))).toBe('no_account');
+      expect(codeOrOk(await auth.isMember(c, me, OTHER_TEAM))).toBe('no_account');
+      await must(rt.bus.execute(accounts.signIn, { pid: PID, soloTeamId: SOLO, user: ALICE }, ctx({ actor: 'system:twitch' })));
+      expect(codeOrOk(await auth.canFound(c, me))).toBe('terms_required');
+      await must(rt.bus.execute(accounts.acceptTerms, { pid: PID, version: PLATFORM_TERMS_VERSION }, ctx({ actor: me })));
+      expect(codeOrOk(await auth.canFound(c, me))).toBe('channel_required');
+      await must(rt.bus.execute(accounts.connectChannel, { pid: PID, twitchId: ALICE.id, token }, ctx({ actor: me })));
+      expect(codeOrOk(await auth.canFound(c, me))).toBe('ok');
+      expect(await auth.isMember(c, me, OTHER_TEAM)).toEqual({ rejected: true, code: 'not_member', message: 'Du bist kein Mitglied dieses Teams.' });
+      await must(rt.bus.execute(rt.teams.create, { teamId: OTHER_TEAM, name: 'Werwölfe' }, ctx({ actor: me })));
+      expect(codeOrOk(await auth.isMember(c, me, OTHER_TEAM))).toBe('ok');
+      expect(codeOrOk(await auth.isMember(c, 'system:migration', OTHER_TEAM))).toBe('ok');
+      expect(codeOrOk(await auth.canFound(c, 'system:migration'))).toBe('ok');
+      expect(codeOrOk(await auth.isMember(c, me, 'nope'))).toBe('not_member');
+      await must(rt.bus.execute(accounts.deleteAccount, { pid: PID }, ctx({ actor: me })));
+      expect(codeOrOk(await auth.canFound(c, me))).toBe('no_account');
+      expect(codeOrOk(await auth.isMember(c, me, OTHER_TEAM))).toBe('no_account');
+    } finally {
+      c.release();
+    }
   });
 
   it('a deleted account loses control', async () => {
