@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { afterEach, describe, expect, it } from 'vitest';
 import { withTx } from '../src/db/pool.js';
-import { appendLocked, isReverted, lockStream, readEvent, readStream, readStreamPage } from '../src/journal/journal.js';
+import { appendLocked, isReverted, lockStream, readEvent, readStream, readStreamPage, revertedIds } from '../src/journal/journal.js';
 import { ensurePartitions, isMissingPartition, partitionName } from '../src/journal/partitions.js';
 import { AT, freshDb } from './helpers/db.js';
 import { ACTOR, STREAM, testRegistry } from './helpers/fixtures.js';
@@ -142,6 +142,30 @@ describe('append and read', () => {
     expect((await readStreamPage(pool, registry, STREAM, { limit: 500 })).map((e) => e.seq)).toEqual([5, 4, 3, 2, 1]);
     expect((await readStreamPage(pool, registry, STREAM, {})).map((e) => e.seq)).toEqual([5, 4, 3, 2, 1]);
     expect(await readStreamPage(pool, registry, STREAM, { beforeSeq: 1 })).toEqual([]);
+  });
+
+  it('revertedIds answers for a whole page in few queries and follows reversal chains like isReverted', async () => {
+    const pool = await setup();
+    const [a, b, c] = await withTx(pool, async (cl) => appendLocked(cl, registry, {
+      stream: STREAM, lastSeq: await lockStream(cl, STREAM), actor: ACTOR, correlationId: randomUUID(), at: AT,
+      events: [1, 2, 3].map((by) => ({ type: 'counter_incremented', payload: { by } })),
+    }));
+    // a wird aufgehoben, die Aufhebung von b wird selbst aufgehoben → b gilt als nicht aufgehoben.
+    const [ra, rb] = await withTx(pool, async (cl) => appendLocked(cl, registry, {
+      stream: STREAM, lastSeq: await lockStream(cl, STREAM), actor: ACTOR, correlationId: randomUUID(), at: AT,
+      events: [
+        { type: 'counter_decremented', payload: { by: 1 }, reason: 'x', reversesEventId: a!.id },
+        { type: 'counter_decremented', payload: { by: 2 }, reason: 'x', reversesEventId: b!.id },
+      ],
+    }));
+    await withTx(pool, async (cl) => appendLocked(cl, registry, {
+      stream: STREAM, lastSeq: await lockStream(cl, STREAM), actor: ACTOR, correlationId: randomUUID(), at: AT,
+      events: [{ type: 'counter_incremented', payload: { by: 2 }, reason: 'x', reversesEventId: rb!.id }],
+    }));
+    const set = await revertedIds(pool, [a!.id, b!.id, c!.id, ra!.id, rb!.id]);
+    expect([...set].sort()).toEqual([a!.id, rb!.id].sort());
+    expect(await isReverted(pool, b!.id)).toBe(false);
+    expect(await revertedIds(pool, [])).toEqual(new Set());
   });
 
   it('refuses TRUNCATE, UPDATE and DELETE directly on a partition', async () => {

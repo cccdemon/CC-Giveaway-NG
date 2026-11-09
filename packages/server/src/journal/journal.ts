@@ -120,6 +120,27 @@ export async function readEvent(db: Queryable, registry: EventTypeRegistry, id: 
   return r.rows[0] ? registry.upcast(rowToRecord(r.rows[0])) : null;
 }
 
+/**
+ * Wirksam umgekehrte Ereignisse aus einer Liste, in wenigen Abfragen (Verlauf, NEW_DESIGN.md 5.3): Ein Ereignis gilt als
+ * aufgehoben, wenn eine seiner Umkehrungen selbst nicht aufgehoben ist. Je Kettenstufe eine Abfrage.
+ */
+export async function revertedIds(db: Queryable, ids: readonly EventId[]): Promise<Set<EventId>> {
+  const valid = [...new Set(ids.filter(isEventId))];
+  if (valid.length === 0) return new Set();
+  const r = await db.query<{ id: string; reverses_event_id: string }>(
+    'SELECT id, reverses_event_id FROM events WHERE reverses_event_id = ANY($1::bigint[])',
+    [valid],
+  );
+  if (r.rows.length === 0) return new Set();
+  const reverters = r.rows.map((x) => String(x.id));
+  const revertersReverted = await revertedIds(db, reverters);
+  const out = new Set<EventId>();
+  for (const row of r.rows) {
+    if (!revertersReverted.has(String(row.id))) out.add(String(row.reverses_event_id));
+  }
+  return out;
+}
+
 /** Wirksam umgekehrt: es gibt eine Umkehrung, die selbst nicht (wirksam) aufgehoben ist. */
 export async function isReverted(db: Queryable, id: EventId, seen: ReadonlySet<string> = new Set()): Promise<boolean> {
   if (!isEventId(id)) return false;

@@ -54,8 +54,11 @@ export interface UiText {
   line: number;
 }
 
-/** Zeichenketten an UI-Stellen: reject('code', '…'), why: '…', message: '…', text: '…'. Auch Vorlagen mit `…${…}…`. */
-const UI_TEXT_RE = /(\breject\(\s*'[^']*'\s*,\s*|\bwhy:\s*|\bmessage:\s*|\btext:\s*)(?:'((?:[^'\\\n]|\\.)*)'|`((?:[^`\\]|\\.)*)`)/g;
+/**
+ * Zeichenketten an UI-Stellen: reject('code', '…'), why: '…', message: '…', text: '…', emptyPool: '…' und Konstanten
+ * nach der Konvention `X_TEXT = '…'`. Auch Vorlagen mit `…${…}…`.
+ */
+const UI_TEXT_RE = /(\breject\(\s*'[^']*'\s*,\s*|\bwhy:\s*|\bmessage:\s*|\btext:\s*|\bemptyPool:\s*|\b[A-Z][A-Z0-9_]*_TEXT\s*=\s*)(?:'((?:[^'\\\n]|\\.)*)'|`((?:[^`\\]|\\.)*)`)/g;
 
 export function extractUiTexts(source: string): UiText[] {
   const out: UiText[] = [];

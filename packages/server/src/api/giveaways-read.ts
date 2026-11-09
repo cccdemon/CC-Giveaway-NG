@@ -9,7 +9,7 @@ import type { Runtime } from '../framework/runtime.js';
 import { loadStreamState } from '../framework/state.js';
 import { displayNamesOf, displayNameOf } from '../identity/identities.js';
 import { channelStatusView, type ChannelStatusView } from '../ingest/status-view.js';
-import { isReverted, readStreamPage } from '../journal/journal.js';
+import { readStreamPage, revertedIds } from '../journal/journal.js';
 import type { EventRecord, StreamId } from '../journal/types.js';
 import type { AnyKernel, Pid } from '../kernel-api/index.js';
 
@@ -163,14 +163,14 @@ export async function historyPage(
   const limit = Math.min(200, Math.max(1, Math.trunc(o.limit ?? HISTORY_LIMIT_DEFAULT)));
   const events = await readStreamPage(c, rt.registry, stream, { ...(o.beforeSeq === undefined ? {} : { beforeSeq: o.beforeSeq }), limit });
   const pids = events.map((e) => pidOfActor(e.actor)).filter((p): p is string => p !== null);
-  const names = await displayNamesOf(c, pids);
-  const entries: HistoryEntry[] = [];
-  for (const e of events) entries.push(await historyEntry(c, rt, e, names));
+  // Zwei Abfragen je Seite statt einer je Eintrag: Namen und Umkehrstatus im Bündel.
+  const [names, reverted] = await Promise.all([displayNamesOf(c, pids), revertedIds(c, events.map((e) => e.id))]);
+  const entries = events.map((e) => historyEntry(rt, e, names, reverted.has(e.id)));
   const last = entries.at(-1);
   return { entries, nextBeforeSeq: last !== undefined && entries.length === limit && last.seq > 1 ? last.seq : null };
 }
 
-async function historyEntry(c: Queryable, rt: Runtime, e: EventRecord, names: Map<string, string>): Promise<HistoryEntry> {
+function historyEntry(rt: Runtime, e: EventRecord, names: Map<string, string>, reverted: boolean): HistoryEntry {
   const spec = rt.registry.get(e.type).reversal;
   const pid = pidOfActor(e.actor);
   return {
@@ -181,7 +181,7 @@ async function historyEntry(c: Queryable, rt: Runtime, e: EventRecord, names: Ma
     actor: pid === null ? { kind: 'system', name: e.actor.replace(/^system:/, '') } : { kind: 'user', pid, displayName: names.get(pid) ?? displayNameOf(null, pid) },
     reason: e.reason,
     reversesEventId: e.reversesEventId,
-    reverted: await isReverted(c, e.id),
+    reverted,
     reversal: spec.kind === 'none' ? { kind: 'none', why: spec.why } : { kind: spec.kind },
     payload: e.payload,
   };

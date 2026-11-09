@@ -36,6 +36,9 @@ describe('Textregeln (NEW_DESIGN.md 11.6)', () => {
       "const other = 'kein UI-Text';",
       "const label = { label: 'Coin-Basis' };",
       "return reject(\n  'two_lines',\n  'Auf zwei Zeilen.',\n);",
+      "const display = { emptyPool: 'Niemand ist angemeldet.' };",
+      "const TOO_LATE_TEXT = 'Nach der Ziehung geht das nicht mehr.';",
+      "export const SELF_TEXT = 'Nur du selbst.';",
     ].join('\n');
     expect(extractUiTexts(src)).toEqual([
       { text: 'Melde dich an.', line: 2 },
@@ -43,6 +46,9 @@ describe('Textregeln (NEW_DESIGN.md 11.6)', () => {
       { text: 'Dir fehlen ${n} Coins für ${count} Tickets.', line: 4 },
       { text: 'Twitch antwortet nicht.', line: 5 },
       { text: 'Auf zwei Zeilen.', line: 10 },
+      { text: 'Niemand ist angemeldet.', line: 12 },
+      { text: 'Nach der Ziehung geht das nicht mehr.', line: 13 },
+      { text: 'Nur du selbst.', line: 14 },
     ]);
   });
 });
