@@ -38,10 +38,10 @@ describe('Lebenszyklus', () => {
       kernelVersion: 1,
       settings: {
         config: { windowSec: 120 }, prize: 'Key', sponsor: null, channels: [P1], winnersCount: 1, claimDays: 14, gates: [], legal: null,
-        counting: 'registered', purgeDays: 7, keyword: null, chatBonus: { enabled: true, sec: 2, minWords: 4, cooldownSec: 10 },
+        contact: null, counting: 'registered', purgeDays: 7, keyword: null, chatBonus: { enabled: true, sec: 2, minWords: 4, cooldownSec: 10 },
       },
     });
-    expect(events[0]!.typeVersion).toBe(2);
+    expect(events[0]!.typeVersion).toBe(3);
     const row = (await pool.query('SELECT * FROM giveaways WHERE id = $1', [GID])).rows[0];
     expect(row).toMatchObject({
       id: GID, status: 'draft', team_id: TEAM, kernel: 'instant', kernel_version: 1, claim_days: 14, winners_count: 1,
@@ -243,6 +243,23 @@ describe('Lebenszyklus', () => {
     expect(s.settings.config).toEqual({ windowSec: 300 });
     expect(s.settings.prize).toBe('Neu');
   });
+  it('settings carry contact: default null, max 200 characters, changeable like other rules', async () => {
+    const { rt } = await setup();
+    await must(rt, rt.handlers.create, createCmd());
+    expect((await state(rt)).settings.contact).toBeNull();
+    expect(await run(rt, rt.handlers.changeSettings, { giveawayId: GID, settings: { contact: 'x'.repeat(201) } })).toEqual({
+      ok: false,
+      rejection: { rejected: true, code: 'contact_too_long', message: 'Der Kontaktweg darf höchstens 200 Zeichen haben.' },
+    });
+    await must(rt, rt.handlers.changeSettings, { giveawayId: GID, settings: { contact: 'Discord: alice' } });
+    expect((await state(rt)).settings.contact).toBe('Discord: alice');
+    await must(rt, rt.handlers.changeSettings, { giveawayId: GID, settings: { prize: 'Neu' } });
+    expect((await state(rt)).settings.contact).toBe('Discord: alice');
+    await must(rt, rt.handlers.changeSettings, { giveawayId: GID, settings: { contact: null } });
+    expect((await state(rt)).settings.contact).toBeNull();
+    expect(await code(run(rt, rt.handlers.create, createCmd({ giveawayId: GID2 }, { contact: 42 })))).toBe('contact_too_long');
+  });
+
   it('create and change_settings reject a keyword equal to a chat command word of the kernel', async () => {
     const { rt } = await setup();
     expect(await code(run(rt, rt.handlers.create, createCmd({ kernelId: 'tickets' }, { keyword: '!TICKET' })))).toBe('keyword_reserved');

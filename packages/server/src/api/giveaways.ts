@@ -1,10 +1,13 @@
 // Streamer-App (NEW_DESIGN.md 11.1): Kernkatalog, Kacheln, Detail, Teilnehmer, Verlauf. Rechte über GiveawayAuthorizer.controls.
+import { randomUUID } from 'node:crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type pg from 'pg';
 import { logRead } from '../audit/access-log.js';
 import { UUID_RE } from '../framework/authorize.js';
+import type { CommandHandler } from '../framework/command-bus.js';
 import { GIVEAWAY_NOT_FOUND } from '../framework/giveaway/authorize.js';
-import { giveawayStream, type GiveawayStatus } from '../framework/giveaway/state.js';
+import type { ChangeSettingsCmd, CreateGiveawayCmd, GiveawayCmd } from '../framework/giveaway/lifecycle.js';
+import { giveawayStream, type GiveawayState, type GiveawayStatus, type WinnerStatus } from '../framework/giveaway/state.js';
 import { channelStatusView } from '../ingest/status-view.js';
 import type { ApiDeps } from './auth.js';
 import { giveawayDetail, historyPage, kernelInfo, loadGiveaway, participantRows } from './giveaways-read.js';
@@ -108,6 +111,78 @@ export function registerGiveawayRoutes(app: FastifyInstance, deps: ApiDeps, pool
       c.release();
     }
   });
+
+  // --- Befehle (NEW_DESIGN.md 7.1–7.3, 6.3): jeder läuft über den Bus mit der Sitzung als Akteur und antwortet mit den geschriebenen Ereignissen.
+
+  const execute = async <C, P, Q>(req: FastifyRequest, reply: FastifyReply, h: CommandHandler<C, GiveawayState, P, Q>, cmd: C, status = 200, extra: Record<string, unknown> = {}): Promise<void> => {
+    const r = await deps.rt.bus.execute(h, cmd, { actor: `user:${req.session!.pid}`, correlationId: randomUUID(), now: now(), ip: req.ip });
+    if (!r.ok) {
+      await send(reply, rejectionToHttp(r.rejection));
+      return;
+    }
+    await reply.code(status).send({ ...extra, events: r.events.map((e) => ({ id: e.id, seq: e.seq, type: e.type })) });
+  };
+  const body = <T>(req: FastifyRequest): Partial<T> => (typeof req.body === 'object' && req.body !== null ? (req.body as Partial<T>) : {});
+  const idOf = (req: FastifyRequest<IdParams>) => (UUID_RE.test(req.params.id) ? req.params.id : null);
+  /** Befehle auf ein Giveaway: eine ungültige ID ist „nicht gefunden“, der Rest läuft über authorize des Handlers. */
+  const onGiveaway =
+    <C extends { giveawayId: string }, P, Q>(h: CommandHandler<C, GiveawayState, P, Q>, cmdOf: (req: FastifyRequest<IdParams>) => Omit<C, 'giveawayId'>) =>
+    async (req: FastifyRequest<IdParams>, reply: FastifyReply): Promise<void> => {
+      const id = idOf(req);
+      if (id === null) {
+        await notFound(reply);
+        return;
+      }
+      await execute(req, reply, h, { ...cmdOf(req), giveawayId: id } as C);
+    };
+  const h = deps.rt.handlers;
+
+  app.post('/giveaways', guard, async (req, reply) => {
+    const giveawayId = randomUUID();
+    const b = body<{ teamId: string; kernelId: string; settings: CreateGiveawayCmd['settings'] }>(req);
+    await execute(req, reply, h.create, { giveawayId, teamId: b.teamId as string, kernelId: b.kernelId as string, settings: (b.settings ?? {}) as CreateGiveawayCmd['settings'] }, 201, { giveawayId });
+  });
+  app.put<IdParams>('/giveaways/:id/settings', guard, onGiveaway(h.changeSettings, (req) => ({ settings: body<{ settings: ChangeSettingsCmd['settings'] }>(req).settings ?? {} })));
+  const transitions = [
+    ['open', h.open], ['pause', h.pause], ['resume', h.resume], ['close', h.close], ['reopen', h.reopen], ['cancel', h.cancel], ['complete', h.complete], ['draw', h.draw],
+  ] as const;
+  for (const [path, handler] of transitions) {
+    app.post<IdParams>(`/giveaways/:id/${path}`, guard, onGiveaway(handler as CommandHandler<GiveawayCmd, GiveawayState, unknown, unknown>, () => ({})));
+  }
+  app.post<IdParams>('/giveaways/:id/redraw', guard, onGiveaway(h.redraw, (req) => {
+    const b = body<{ replace: string; reason: string }>(req);
+    return { replace: b.replace as string, reason: b.reason as string };
+  }));
+  app.put<{ Params: { id: string; pid: string } }>('/giveaways/:id/winners/:pid', guard, async (req, reply) => {
+    const id = idOf(req);
+    if (id === null) {
+      await notFound(reply);
+      return;
+    }
+    await execute(req, reply, h.setWinnerStatus, { giveawayId: id, pid: req.params.pid, status: body<{ status: WinnerStatus }>(req).status as WinnerStatus });
+  });
+  app.post<IdParams>('/giveaways/:id/boost', guard, onGiveaway(h.startBoost, (req) => {
+    const b = body<{ factor: number; durationSec: number }>(req);
+    return { factor: b.factor as number, durationSec: b.durationSec as number };
+  }));
+  app.delete<IdParams>('/giveaways/:id/boost', guard, onGiveaway(h.stopBoost, () => ({})));
+  app.post<IdParams>('/giveaways/:id/corrections', guard, onGiveaway(h.correctWatch, (req) => {
+    const b = body<{ channel: string; pid: string; sec: number; reason: string }>(req);
+    return { channel: b.channel as string, pid: b.pid as string, sec: b.sec as number, reason: b.reason as string };
+  }));
+  app.post<IdParams>('/giveaways/:id/revert', guard, async (req, reply) => {
+    const id = idOf(req);
+    if (id === null) {
+      await notFound(reply);
+      return;
+    }
+    const b = body<{ eventId: string; reason: string }>(req);
+    await execute(req, reply, h.revert, { stream: giveawayStream(id), eventId: String(b.eventId ?? ''), reason: b.reason as string });
+  });
+  app.post<IdParams>('/giveaways/:id/kernel-commands', guard, onGiveaway(h.kernelCommand, (req) => {
+    const b = body<{ type: string; args: Record<string, unknown> }>(req);
+    return { command: { type: b.type as string, args: (b.args ?? {}) as Record<string, unknown> } };
+  }));
 
   app.get('/giveaways/:id/history', guard, async (req: FastifyRequest<IdParams & { Querystring: { beforeSeq?: string; limit?: string } }>, reply) => {
     const c = await pool.connect();

@@ -54,6 +54,12 @@ export function upcastSettingsV1(s: unknown): unknown {
   };
 }
 
+/** v2 → v3: Kontaktweg des Streamers (Teilprojekt 8a, NEW_DESIGN.md 7.3). */
+export function upcastSettingsV2(s: unknown): unknown {
+  const old = (s ?? {}) as Record<string, unknown>;
+  return { ...old, contact: old.contact ?? null };
+}
+
 export const SERVICE_EVENT_TYPES = {
   boostStarted: 'boost_started',
   boostEnded: 'boost_ended',

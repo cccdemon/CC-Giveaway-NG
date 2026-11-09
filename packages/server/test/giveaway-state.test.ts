@@ -53,7 +53,7 @@ const legacySettings = {
   claimDays: 14,
   gates: [],
 };
-const settings = { ...legacySettings, legal: null, ...SERVICE_DEFAULTS };
+const settings = { ...legacySettings, legal: null, ...SERVICE_DEFAULTS, contact: null };
 const MINUTE = '2026-10-28T12:00:00.000Z';
 
 const created = (seq = 1, kernelId = 'instant') =>
@@ -98,7 +98,7 @@ describe('giveaway reducer', () => {
     expect(s.draws).toEqual([]);
     expect(s.winners).toEqual({});
     expect(s.kernelState).toBeNull();
-    expect(s.settings).toEqual({ config: {}, prize: '', sponsor: null, channels: [], winnersCount: 1, claimDays: 14, gates: [], legal: null, ...SERVICE_DEFAULTS });
+    expect(s.settings).toEqual({ config: {}, prize: '', sponsor: null, channels: [], winnersCount: 1, claimDays: 14, gates: [], legal: null, contact: null, ...SERVICE_DEFAULTS });
     expect(s.seen).toEqual({});
     expect(s.watchMinutes).toEqual({});
     expect(s.chatLast).toEqual({});
@@ -212,12 +212,16 @@ describe('giveaway reducer', () => {
     expect((w.kernelState as WatchtimeState).sec).toEqual({ [P1]: { [CH]: 120 } });
   });
 
-  it('v1 created and settings_changed payloads upcast to the defaults', () => {
+  it('v1 and v2 created and settings_changed payloads upcast to the defaults (v3 adds contact)', () => {
     const registry = new EventTypeRegistry();
     registerGiveawayEvents(registry, kernels);
     const c = registry.upcast(rec(1, GIVEAWAY_EVENTS.created, { teamId: TEAM, kernelId: 'instant', kernelVersion: 1, settings: legacySettings }));
-    expect(c.typeVersion).toBe(2);
+    expect(c.typeVersion).toBe(3);
     expect((c.payload as { settings: unknown }).settings).toEqual(settings);
+    const v2Settings = Object.fromEntries(Object.entries(settings).filter(([k]) => k !== 'contact'));
+    const c2 = registry.upcast({ ...rec(1, GIVEAWAY_EVENTS.created, { teamId: TEAM, kernelId: 'instant', kernelVersion: 1, settings: v2Settings }), typeVersion: 2 });
+    expect(c2.typeVersion).toBe(3);
+    expect((c2.payload as { settings: unknown }).settings).toEqual(settings);
     const withLegal = { ...legacySettings, legal: { impressumUrl: 'https://x.example/i', terms: null, privacyUrl: null } };
     const sc = registry.upcast(rec(2, GIVEAWAY_EVENTS.settingsChanged, { before: legacySettings, after: withLegal }));
     expect(sc.payload).toEqual({ before: settings, after: { ...settings, legal: withLegal.legal } });

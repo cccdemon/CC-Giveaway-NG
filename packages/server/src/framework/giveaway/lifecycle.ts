@@ -103,6 +103,9 @@ function checkSettings(kernel: AnyKernel, s: GiveawaySettings): GiveawaySettings
   if (s.sponsor !== null && (typeof s.sponsor !== 'string' || s.sponsor.length > TEXT_MAX)) {
     return reject('sponsor_too_long', 'Der Sponsor darf höchstens 200 Zeichen haben.');
   }
+  if (s.contact !== null && (typeof s.contact !== 'string' || s.contact.length > TEXT_MAX)) {
+    return reject('contact_too_long', 'Der Kontaktweg darf höchstens 200 Zeichen haben.');
+  }
   if (!Array.isArray(s.channels) || s.channels.length === 0) return reject('channels_required', 'Wähle mindestens einen Kanal.');
   if (!s.channels.every((ch: unknown) => typeof ch === 'string' && UUID_RE.test(ch))) {
     return reject('invalid_channel', 'Ein Kanal ist keine gültige ID.');
@@ -177,6 +180,7 @@ export function createGiveawayHandler(d: GiveawayDeps): CommandHandler<CreateGiv
         claimDays: s.claimDays ?? 14,
         gates: s.gates ?? [],
         legal: s.legal ?? null,
+        contact: s.contact ?? null,
         counting: s.counting ?? SERVICE_DEFAULTS.counting,
         purgeDays: s.purgeDays ?? SERVICE_DEFAULTS.purgeDays,
         keyword: s.keyword ?? SERVICE_DEFAULTS.keyword,
@@ -245,6 +249,7 @@ export function changeSettingsHandler(d: GiveawayDeps): CommandHandler<ChangeSet
         claimDays: s.claimDays ?? before.claimDays,
         gates: s.gates ?? before.gates,
         legal: s.legal === undefined ? before.legal : s.legal,
+        contact: s.contact === undefined ? before.contact : s.contact,
         counting: s.counting ?? before.counting,
         purgeDays: s.purgeDays ?? before.purgeDays,
         keyword: s.keyword === undefined ? before.keyword : s.keyword,

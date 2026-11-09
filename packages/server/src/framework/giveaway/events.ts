@@ -9,11 +9,13 @@ import { frozenLegalSchema, legalSchema } from '../legal.js';
 import { registerRevertTypes } from '../revert.js';
 import { GATE_IDS } from './gates.js';
 import { NOT_REGISTERED_TEXT, TOO_LATE, TOO_LATE_TEXT } from './registration.js';
-import { KEYWORD_RE, PURGE_DAYS_MAX, PURGE_DAYS_MIN, chatBonusSchema, countingSchema, registerServiceEvents, upcastSettingsV1 } from './services.js';
+import { KEYWORD_RE, PURGE_DAYS_MAX, PURGE_DAYS_MIN, chatBonusSchema, countingSchema, registerServiceEvents, upcastSettingsV1, upcastSettingsV2 } from './services.js';
 import { GIVEAWAY_EVENTS, type GiveawaySettings, type GiveawayState, type GiveawayStatus, type WinnerStatus } from './state.js';
 
 const STATUSES = ['draft', 'open', 'paused', 'closed', 'drawn', 'completed', 'cancelled'] as const satisfies readonly GiveawayStatus[];
 const WINNER_STATUSES = ['pending', 'reported', 'shipped', 'done', 'forfeited'] as const satisfies readonly WinnerStatus[];
+
+export const CONTACT_MAX = 200;
 
 const settingsSchema = z.object({
   config: z.record(z.string(), z.unknown()),
@@ -28,14 +30,19 @@ const settingsSchema = z.object({
   purgeDays: z.int().min(PURGE_DAYS_MIN).max(PURGE_DAYS_MAX),
   keyword: z.string().regex(KEYWORD_RE).nullable(),
   chatBonus: chatBonusSchema,
+  contact: z.string().max(CONTACT_MAX).nullable(),
 });
 
-/** v1 → v2: legal und die Felder der Dienste (Teilprojekt 5) mit Defaults. */
-const upcastCreatedV1 = (p: unknown): unknown => ({ ...(p as object), settings: upcastSettingsV1((p as { settings: unknown }).settings) });
-const upcastSettingsChangedV1 = (p: unknown): unknown => {
-  const { before, after } = p as { before: unknown; after: unknown };
-  return { before: upcastSettingsV1(before), after: upcastSettingsV1(after) };
-};
+/** v1 → v2: legal und die Felder der Dienste (Teilprojekt 5) mit Defaults. v2 → v3: contact (Teilprojekt 8a). */
+const liftSettings = (up: (s: unknown) => unknown) => ({
+  created: (p: unknown): unknown => ({ ...(p as object), settings: up((p as { settings: unknown }).settings) }),
+  changed: (p: unknown): unknown => {
+    const { before, after } = p as { before: unknown; after: unknown };
+    return { before: up(before), after: up(after) };
+  },
+});
+const v1 = liftSettings(upcastSettingsV1);
+const v2 = liftSettings(upcastSettingsV2);
 
 const pidSchema = z.object({ pid: z.uuid() });
 
@@ -63,14 +70,14 @@ function registerKernelEvent(registry: EventTypeRegistry, def: KernelEventDef): 
 export function registerGiveawayEvents(registry: EventTypeRegistry, kernels: KernelRegistry): void {
   registry.register({
     type: GIVEAWAY_EVENTS.created,
-    version: 2,
+    version: 3,
     schema: z.object({
       teamId: z.uuid(),
       kernelId: z.string().min(1),
       kernelVersion: z.int().min(1),
       settings: settingsSchema,
     }),
-    upcasters: { 1: upcastCreatedV1 },
+    upcasters: { 1: v1.created, 2: v2.created },
     reversal: { kind: 'none', why: 'Einen Entwurf nimmst du nicht zurück. Brich das Giveaway ab.' },
   });
 
@@ -90,9 +97,9 @@ export function registerGiveawayEvents(registry: EventTypeRegistry, kernels: Ker
 
   registry.register({
     type: GIVEAWAY_EVENTS.settingsChanged,
-    version: 2,
+    version: 3,
     schema: z.object({ before: settingsSchema, after: settingsSchema }),
-    upcasters: { 1: upcastSettingsChangedV1 },
+    upcasters: { 1: v1.changed, 2: v2.changed },
     reversal: {
       kind: 'compensate',
       inverse(target, state) {

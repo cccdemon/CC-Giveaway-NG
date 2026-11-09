@@ -23,6 +23,8 @@ export interface GiveawaySettings extends ServiceSettings {
   gates: GateConfig[];
   /** Rechtstexte je Giveaway. null = die des Profils gelten (NEW_DESIGN.md 9.4). */
   legal: LegalTexts | null;
+  /** Kontaktweg des Streamers für Gewinner (NEW_DESIGN.md 7.3), freier Text, höchstens 200 Zeichen. */
+  contact: string | null;
 }
 
 export interface DrawRecord {
@@ -233,7 +235,7 @@ export function makeGiveawayReducer(kernels: KernelRegistry): StreamReducer<Give
       teamId: '',
       kernelId: '',
       kernelVersionAtCreate: 0,
-      settings: { config: {}, prize: '', sponsor: null, channels: [], winnersCount: 1, claimDays: 14, gates: [], legal: null, ...SERVICE_DEFAULTS },
+      settings: { config: {}, prize: '', sponsor: null, channels: [], winnersCount: 1, claimDays: 14, gates: [], legal: null, contact: null, ...SERVICE_DEFAULTS },
       status: 'draft',
       registered: {},
       draws: [],
