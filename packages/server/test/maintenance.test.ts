@@ -7,6 +7,7 @@ import { minuteOf } from '../src/ingest/bundler.js';
 import { INACTIVE_DAYS } from '../src/identity/inactivity.js';
 import { attachAccounts } from '../src/identity/runtime.js';
 import { SESSION_TTL_DAYS, createSession } from '../src/identity/sessions.js';
+import { recordBrowserError } from '../src/platform/ops.js';
 import { runMaintenance } from '../src/scheduler/maintenance.js';
 import { AT, freshDb } from './helpers/db.js';
 import { ACTOR, ctx } from './helpers/fixtures.js';
@@ -28,8 +29,10 @@ describe('runMaintenance', () => {
     await logRead(db.pool, { actor: ACTOR, action: 'a', target: 't', ip: '10.0.0.1', at: AT });
     await createSession(db.pool, PID, AT);
     await createSession(db.pool, PID, day(39));
+    await recordBrowserError(db.pool, { message: 'alt' }, AT);
+    await recordBrowserError(db.pool, { message: 'neu' }, day(39));
     const res = await runMaintenance(db.pool, day(40));
-    expect(res).toEqual({ partitions: ['events_y2026m11', 'events_y2026m12', 'events_y2027m01'], ipsPurged: 1, sessionsPurged: 1, accountsPurged: 0, unregisteredPurged: 0 });
+    expect(res).toEqual({ partitions: ['events_y2026m11', 'events_y2026m12', 'events_y2027m01'], ipsPurged: 1, sessionsPurged: 1, accountsPurged: 0, unregisteredPurged: 0, browserErrorsPurged: 1 });
     expect(SESSION_TTL_DAYS).toBeLessThan(40);
   });
 
