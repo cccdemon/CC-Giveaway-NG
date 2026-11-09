@@ -168,6 +168,22 @@ describe('Strom team', () => {
     });
   });
 
+  it('revert of member_joined is only for the joined person themself, not a hidden kick', async () => {
+    const { pool, rt } = await setup();
+    await createTeam(rt);
+    await invite(rt);
+    const joined = await join(rt, P1);
+    const joinedId = joined.ok ? joined.events[0]!.id : '';
+    await join(rt, P2);
+    expect(await run(rt, rt.teams.revert, { stream: STREAM, eventId: joinedId, reason: 'raus' }, { actor: userOf(P2) })).toEqual({
+      ok: false,
+      rejection: { rejected: true, code: 'not_you', message: 'Nur die Person selbst nimmt ihren Beitritt zurück.' },
+    });
+    expect(await code(run(rt, rt.teams.revert, { stream: STREAM, eventId: joinedId, reason: 'raus' }, { actor: STREAMER }))).toBe('not_you');
+    expect(await code(run(rt, rt.teams.revert, { stream: STREAM, eventId: joinedId, reason: 'Versehen' }, { actor: userOf(P1) }))).toBe('ok');
+    expect(Object.keys((await teamState({ pool, rt })).members).sort()).toEqual([P2, FOUNDER].sort());
+  });
+
   it('deactivate/reactivate toggle active, repeated calls write nothing, revert of deactivated reactivates, invites fail while inactive', async () => {
     const { pool, rt } = await setup();
     await createTeam(rt);

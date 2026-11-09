@@ -247,8 +247,20 @@ export function unbanParticipantHandler(auth: TeamAuthorizer): Handler<MemberCmd
 }
 
 export function teamRevertHandler(registry: EventTypeRegistry, auth: TeamAuthorizer): CommandHandler<RevertCommand, TeamState, RevertPrepared> {
-  return makeRevertHandler(teamReducer, registry, (cmd: RevertCommand, ctx, c) => {
+  const base = makeRevertHandler(teamReducer, registry, (cmd: RevertCommand, ctx, c) => {
     const teamId = teamIdOfStream(cmd.stream);
     return teamId === null || !isUuid(teamId) ? TEAM_NOT_FOUND() : auth.isMember(c, ctx.actor, teamId);
   });
+  return {
+    ...base,
+    decide(state, cmd, ctx, prepared) {
+      // Ein Beitritt gehört der Person: sonst wäre Rückgängig ein verstecktes Entfernen durch andere Mitglieder (Spec 9.3 kennt kein Entfernen).
+      const target = prepared.target;
+      if (target && target.type === TEAM_EVENTS.memberJoined && !ctx.actor.startsWith('system:')) {
+        const { pid } = target.payload as { pid: Pid };
+        if (ctx.actor !== `user:${pid}`) return reject('not_you', 'Nur die Person selbst nimmt ihren Beitritt zurück.');
+      }
+      return base.decide(state, cmd, ctx, prepared);
+    },
+  };
 }
