@@ -46,7 +46,7 @@
       {#if tile.registered}
         <Button {busy} onclick={onwithdraw}>{L.actions.withdraw}</Button>
       {:else}
-        <Button kind="primary" {busy} onclick={onjoin}>{L.actions.join}</Button>
+        <Button {busy} onclick={onjoin}>{L.actions.join}</Button>
       {/if}
     </div>
   {:else if tile.status === 'paused'}

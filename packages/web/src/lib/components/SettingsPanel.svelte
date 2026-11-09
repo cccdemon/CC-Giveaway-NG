@@ -86,8 +86,8 @@
       {#if chatEnabled}
         <div class="row">
           <Field label={L.fields.chatBonusSec} for="{id}-csec"><input id="{id}-csec" type="number" min="1" max="60" bind:value={chatSec} /></Field>
-          <Field label={L.fields.chatMinWords} for="{id}-cwords"><input id="{id}-cwords" type="number" min="1" max="50" bind:value={chatMinWords} /></Field>
-          <Field label={L.fields.chatCooldown} for="{id}-ccool"><input id="{id}-ccool" type="number" min="0" max="3600" bind:value={chatCooldown} /></Field>
+          <Field label={L.fields.chatMinWords} for="{id}-cwords"><input id="{id}-cwords" type="number" min="1" max="20" bind:value={chatMinWords} /></Field>
+          <Field label={L.fields.chatCooldown} for="{id}-ccool"><input id="{id}-ccool" type="number" min="1" max="600" bind:value={chatCooldown} /></Field>
         </div>
       {/if}
     </fieldset>

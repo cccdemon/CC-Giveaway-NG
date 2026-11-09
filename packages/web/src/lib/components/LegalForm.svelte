@@ -14,9 +14,11 @@
     saved?: boolean;
     /** Beschriftung des Speichern-Knopfs. */
     submitLabel?: string;
+    /** Kupfer für den Speichern-Knopf. Aus, wenn die Ansicht schon eine Hauptaktion hat (Assistent). */
+    primary?: boolean;
   }
 
-  let { value, onsubmit, busy = false, error = null, saved = false, submitLabel = L.actions.save }: Props = $props();
+  let { value, onsubmit, busy = false, error = null, saved = false, submitLabel = L.actions.save, primary = true }: Props = $props();
   const id = $props.id();
 
   // Das Formular startet mit den übergebenen Werten und gehört danach der Person. Die Seite baut es per {#key} neu auf.
@@ -79,7 +81,7 @@
   </div>
 
   <div class="row">
-    <Button type="submit" kind="primary" {busy}>{submitLabel}</Button>
+    <Button type="submit" kind={primary ? 'primary' : 'default'} {busy}>{submitLabel}</Button>
     {#if saved}<span class="tone-ok">{S.saved}</span>{/if}
     {#if error}<span class="error" role="alert">{error}</span>{/if}
   </div>

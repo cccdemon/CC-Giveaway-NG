@@ -34,7 +34,8 @@ describe('PortalCard', () => {
     const { rerender } = render(PortalCard, { props: { tile: { ...base, registered: false, inPool: false, weight: 0, chance: null }, onjoin, onwithdraw: vi.fn(), busy: false, error: null } });
     expect(screen.getByText(S.portal.notRegistered)).toBeInTheDocument();
     const join = screen.getByRole('button', { name: L.actions.join });
-    expect(join.className).toContain('btn-primary');
+    // Genau ein Kupfer-Element je Ansicht: in der Liste trägt keine Karte Kupfer.
+    expect(join.className).not.toContain('btn-primary');
     await fireEvent.click(join);
     expect(onjoin).toHaveBeenCalledTimes(1);
     await rerender({ tile: { ...base, registered: false, inPool: false, weight: 0, chance: null }, onjoin, onwithdraw: vi.fn(), busy: false, error: 'Das Giveaway nimmt gerade keine Anmeldungen an.' });

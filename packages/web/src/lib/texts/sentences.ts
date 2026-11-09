@@ -147,6 +147,7 @@ export const S = {
     deleteConfirm: 'Die Plattform löscht deine Zuordnung sofort. Das geht nicht rückgängig.',
     noParticipations: 'Noch keine Teilnahmen. Ein Streamer gibt dir den Link zum Giveaway.',
     publicIntro: 'Melde dich mit Twitch an, dann kannst du teilnehmen.',
+    publicNoPortal: 'Dieses Giveaway nimmt gerade keine Anmeldungen an. Schau später wieder vorbei.',
     ticketsHint: (word: string) => `Oder im Chat: ${word} und die Anzahl.`,
     ticketsIntro: 'Tickets kaufst du mit Coins aus deiner Zuschauzeit. Jedes Ticket zählt als Los.',
     version: (date: string) => `Du hast der Fassung vom ${date} zugestimmt.`,

@@ -25,6 +25,8 @@
   let errors = $state<Record<string, string>>({});
   let serverError = $state<string | null>(null);
   let legalApplied = $state(false);
+  /** Entwurf angelegt, aber das Öffnen abgelehnt: die Meldung bleibt, der Entwurf ist verlinkt. */
+  let draftId = $state<string | null>(null);
   const action = new Action();
 
   const kernel = $derived(data.kernels.find((k) => k.id === draft.kernelId) ?? null);
@@ -81,11 +83,10 @@
         try {
           await action.api.post(`/api/giveaways/${created.giveawayId}/open`);
         } catch (e) {
-          // Der Entwurf steht. Die Ablehnung des Öffnens zeigt das Detail am Knopf „Öffnen“ erneut.
+          // Der Entwurf steht, das Öffnen nicht: Meldung hier zeigen, Entwurf verlinken. Kein Fehler bleibt still (12.1).
           if (e instanceof ApiError) {
-            step = stepOfRejection(e.code);
+            draftId = created.giveawayId;
             serverError = `${e.message} ${S.wizard.draftSaved}`;
-            await goto(`/giveaways/${created.giveawayId}`);
             return;
           }
           throw e;
@@ -126,6 +127,7 @@
       <h1>{L.wizard.titles[step - 1]}</h1>
     </div>
     {#if serverError}<p class="error" role="alert">{serverError}</p>{/if}
+    {#if draftId}<a class="btn" href="/giveaways/{draftId}">{L.actions.toDetail}</a>{/if}
 
     {#if step === 1}
       <p class="hint">{S.wizard.kernelHint}</p>
@@ -172,8 +174,8 @@
           {#if draft.chatBonus.enabled}
             <div class="row">
               <Field label={L.fields.chatBonusSec} error={errors['chatBonus.sec'] ?? null} for="{id}-csec"><input id="{id}-csec" type="number" min="1" max="60" bind:value={draft.chatBonus.sec} /></Field>
-              <Field label={L.fields.chatMinWords} error={errors['chatBonus.minWords'] ?? null} for="{id}-cwords"><input id="{id}-cwords" type="number" min="1" max="50" bind:value={draft.chatBonus.minWords} /></Field>
-              <Field label={L.fields.chatCooldown} error={errors['chatBonus.cooldownSec'] ?? null} for="{id}-ccool"><input id="{id}-ccool" type="number" min="0" max="3600" bind:value={draft.chatBonus.cooldownSec} /></Field>
+              <Field label={L.fields.chatMinWords} error={errors['chatBonus.minWords'] ?? null} for="{id}-cwords"><input id="{id}-cwords" type="number" min="1" max="20" bind:value={draft.chatBonus.minWords} /></Field>
+              <Field label={L.fields.chatCooldown} error={errors['chatBonus.cooldownSec'] ?? null} for="{id}-ccool"><input id="{id}-ccool" type="number" min="1" max="600" bind:value={draft.chatBonus.cooldownSec} /></Field>
             </div>
           {/if}
         </fieldset>
@@ -198,15 +200,15 @@
         </label>
       </fieldset>
       {#if draft.legal !== 'profile'}
-        <LegalForm value={draft.legal} onsubmit={applyLegal} submitLabel={L.actions.apply} saved={legalApplied} />
+        <LegalForm value={draft.legal} onsubmit={applyLegal} submitLabel={L.actions.apply} saved={legalApplied} primary={false} />
       {/if}
       {#if errors.legal}<p class="error" role="alert">{errors.legal}</p>{/if}
     {:else if step === 6}
       <p>{S.wizard.reviewIntro}</p>
       <p class="hint">{S.wizard.draftHint}</p>
       <div class="row">
-        <Button busy={action.busy} onclick={() => submit(false)}>{L.actions.saveDraft}</Button>
-        <Button kind="primary" icon="play" busy={action.busy} onclick={() => submit(true)}>{L.actions.openNow}</Button>
+        <Button busy={action.busy} disabled={draftId !== null} onclick={() => submit(false)}>{L.actions.saveDraft}</Button>
+        <Button kind="primary" icon="play" busy={action.busy} disabled={draftId !== null} onclick={() => submit(true)}>{L.actions.openNow}</Button>
       </div>
     {/if}
 

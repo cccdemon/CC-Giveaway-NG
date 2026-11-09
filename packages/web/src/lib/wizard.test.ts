@@ -43,6 +43,12 @@ describe('wizard', () => {
     expect(validateStep(2, { ...ok, keyword: 'zwei wörter' }, watchtime, [])).toHaveProperty('keyword');
     expect(validateStep(2, { ...ok, contact: 'x'.repeat(201) }, watchtime, [])).toHaveProperty('contact');
     expect(validateStep(2, { ...ok, config: { ...ok.config, note: 'x'.repeat(51) } }, watchtime, [])).toHaveProperty('config.note');
+    // Grenzen des Servers (services.ts): sec 1–60, minWords 1–20, cooldownSec 1–600
+    expect(validateStep(2, { ...ok, chatBonus: { ...ok.chatBonus, minWords: 21 } }, watchtime, [])).toHaveProperty('chatBonus.minWords');
+    expect(validateStep(2, { ...ok, chatBonus: { ...ok.chatBonus, cooldownSec: 0 } }, watchtime, [])).toHaveProperty('chatBonus.cooldownSec');
+    expect(validateStep(2, { ...ok, chatBonus: { ...ok.chatBonus, cooldownSec: 601 } }, watchtime, [])).toHaveProperty('chatBonus.cooldownSec');
+    expect(validateStep(2, { ...ok, chatBonus: { ...ok.chatBonus, sec: 61 } }, watchtime, [])).toHaveProperty('chatBonus.sec');
+    expect(validateStep(2, { ...ok, chatBonus: { enabled: false, sec: 99, minWords: 99, cooldownSec: 0 } }, watchtime, [])).toEqual({});
   });
 
   it('validateStep 3 needs at least one channel inside the team', () => {

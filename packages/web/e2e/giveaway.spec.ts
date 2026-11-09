@@ -124,6 +124,12 @@ test('Streamer startet, pausiert, zieht und macht rückgängig, Teilnehmer gewin
   await ready(a);
   await expect(a.getByText(new RegExp(L.participant.deleted)).first()).toBeVisible();
 
+  // Abgelaufene Sitzung mitten in der Arbeit: keine Schleife, zurück zur Anmeldung mit Rücksprung
+  await alice.context.clearCookies();
+  await a.getByRole('link', { name: L.nav.team }).click();
+  await expect(a).toHaveURL(/\/\?return=%2Fteams$/);
+  await expect(a.getByRole('link', { name: L.actions.login }).first()).toBeVisible();
+
   await bob.context.close();
   await alice.context.close();
 });

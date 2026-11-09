@@ -22,6 +22,13 @@ describe('LegalForm', () => {
     expect(onsubmit).toHaveBeenLastCalledWith({ impressumUrl: 'https://x.example/impressum', terms: { text: 'Teilnahme ab 18.' }, privacyUrl: 'https://x.example/datenschutz' });
   });
 
+  it('renders the save button without copper when primary is false (wizard step 5)', () => {
+    render(LegalForm, { props: { value: EMPTY, onsubmit: vi.fn(), primary: false } });
+    expect(screen.getByRole('button', { name: L.actions.save }).className).not.toContain('btn-primary');
+    render(LegalForm, { props: { value: EMPTY, onsubmit: vi.fn() } });
+    expect(screen.getAllByRole('button', { name: L.actions.save })[1]!.className).toContain('btn-primary');
+  });
+
   it('starts from existing values and shows the checklist of required contents', () => {
     render(LegalForm, { props: { value: { impressumUrl: 'https://x.example/i', terms: { text: 'Regeln.' }, privacyUrl: null }, onsubmit: vi.fn() } });
     expect(screen.getByLabelText(L.fields.impressumUrl)).toHaveValue('https://x.example/i');

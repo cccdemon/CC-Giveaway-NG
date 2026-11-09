@@ -1,7 +1,7 @@
 <script lang="ts">
   import { invalidate } from '$app/navigation';
   import { Action as Cmd } from '#lib/action.svelte.js';
-  import type { GiveawaySettings, HistoryEntry, WinnerStatus } from '#lib/api/types.js';
+  import type { GiveawaySettings, HistoryEntry, TeamDetail, WinnerStatus } from '#lib/api/types.js';
   import ActionBar from '#lib/components/ActionBar.svelte';
   import BoostForm from '#lib/components/BoostForm.svelte';
   import Confirm from '#lib/components/Confirm.svelte';
@@ -32,6 +32,10 @@
   let busy = $state<Action | null>(null);
   let panel = $state<'boost' | 'correct' | 'settings' | null>(null);
   let reverting = $state<HistoryEntry | null>(null);
+  /** Zählt das Öffnen des Einstellungs-Panels: das Formular lebt, bis die Person es schließt, nicht bis zum nächsten Live-Ereignis. */
+  let settingsOpened = $state(0);
+  let channelOptions = $state<{ pid: string; displayName: string }[] | null>(null);
+  const teamCmd = new Cmd();
 
   const view = $derived(actionsOf({ status: detail.status, boost: detail.boost, kernel: detail.kernel, winners: detail.winners }));
   const kernelLabels = $derived(Object.fromEntries(detail.kernel.commands.map((c) => [c.type, c.label])));
@@ -47,6 +51,10 @@
     if (a === 'boost' || a === 'correct' || a === 'settings') {
       panel = panel === a ? null : a;
       panelCmd.reset();
+      if (panel === 'settings') {
+        settingsOpened += 1;
+        if (channelOptions === null) await loadChannelOptions();
+      }
       return;
     }
     busy = a;
@@ -54,6 +62,15 @@
     else if (a.startsWith('kernel:')) await cmd.run((api) => api.post(`${base}/kernel-commands`, { type: a.slice('kernel:'.length), args: {} }), refresh);
     else await cmd.run((api) => api.post(`${base}/${a}`), refresh);
     busy = null;
+  }
+  /** Solo-Team: der eigene Kanal. Sonst die Mitglieder des Teams, einmal je Seite. */
+  async function loadChannelOptions() {
+    if (detail.teamId === data.me.soloTeamId) {
+      channelOptions = [{ pid: data.me.pid, displayName: data.me.displayName }];
+      return;
+    }
+    const team = await teamCmd.run((api) => api.get<TeamDetail>(`/api/teams/${detail.teamId}`));
+    channelOptions = team?.members ?? [];
   }
   const closePanel = async () => {
     panel = null;
@@ -114,8 +131,8 @@
 {:else if panel === 'correct'}
   <CorrectionForm channels={detail.channels} rows={data.participants} busy={panelCmd.busy} error={panelCmd.error} onsubmit={correct} oncancel={() => (panel = null)} />
 {:else if panel === 'settings'}
-  {#key detail.settings}
-    <SettingsPanel settings={detail.settings} kernel={detail.kernel} channelOptions={data.channelOptions} busy={panelCmd.busy} error={panelCmd.error} onsave={saveSettings} oncancel={() => (panel = null)} />
+  {#key settingsOpened}
+    <SettingsPanel settings={detail.settings} kernel={detail.kernel} channelOptions={channelOptions ?? []} busy={panelCmd.busy} error={panelCmd.error ?? teamCmd.error} onsave={saveSettings} oncancel={() => (panel = null)} />
   {/key}
 {/if}
 

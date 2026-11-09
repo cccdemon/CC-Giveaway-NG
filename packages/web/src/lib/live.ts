@@ -1,5 +1,5 @@
 // Verdrahtung des Live-Clients im Browser: je Ereignis lädt die Seite die Daten des Stroms neu (depends('api:stream:<stream>')).
-import { goto, invalidate } from '$app/navigation';
+import { invalidate } from '$app/navigation';
 import { writable } from 'svelte/store';
 import { createLiveClient, type LiveClient, type LiveState } from './ws.js';
 
@@ -23,7 +23,8 @@ export function liveClient(): LiveClient {
       },
       onNoSession: () => {
         liveState.set('off');
-        void goto('/');
+        // Ganze Seite neu: löscht veraltete Daten und den geschlossenen Live-Client.
+        globalThis.location.assign('/');
       },
     });
     client.state.subscribe((s) => liveState.set(s));

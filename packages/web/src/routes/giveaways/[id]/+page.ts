@@ -1,5 +1,5 @@
 import { apiOf, loadOrRedirect } from '#lib/api/client.js';
-import type { GiveawayDetail, HistoryPage, ParticipantView, TeamDetail } from '#lib/api/types.js';
+import type { GiveawayDetail, HistoryPage, ParticipantView } from '#lib/api/types.js';
 import { requireStreamer } from '#lib/guard.js';
 import { HISTORY_PREVIEW } from '#lib/history-limits.js';
 import type { PageLoad } from './$types';
@@ -15,10 +15,6 @@ export const load: PageLoad = async ({ parent, fetch, url, params, depends }) =>
     Promise.all([api.get<GiveawayDetail>(base), api.get<ParticipantView[]>(`${base}/participants`), api.get<HistoryPage>(`${base}/history?limit=${HISTORY_PREVIEW}`)]),
     url,
   );
-  // Kanäle für die Einstellungen: Solo-Team = eigener Kanal, sonst die Mitglieder des Teams.
-  const channelOptions =
-    detail.teamId === m.soloTeamId
-      ? [{ pid: m.pid, displayName: m.displayName }]
-      : (await loadOrRedirect(api.get<TeamDetail>(`/api/teams/${detail.teamId}`), url)).members;
-  return { me: m, detail, participants, history, channelOptions };
+  // Kanäle für die Einstellungen lädt die Seite erst, wenn das Panel aufgeht (sonst ein Team-Aufruf je Live-Ereignis).
+  return { me: m, detail, participants, history };
 };

@@ -34,6 +34,8 @@ export const LIMITS = {
   claimDays: { min: 1, max: 90 },
   purgeDays: { min: 1, max: 90 },
   days: { min: 1, max: 3650 },
+  /** Chat-Bonus wie services.ts: sec 1–60, minWords 1–20, cooldownSec 1–600. */
+  chat: { sec: { min: 1, max: 60 }, minWords: { min: 1, max: 20 }, cooldownSec: { min: 1, max: 600 } },
   keyword: /^\S{2,32}$/,
 } as const;
 
@@ -94,9 +96,10 @@ export function validateStep(step: Step, d: WizardDraft, k: KernelInfo | null, t
       if (d.keyword.trim() !== '' && !LIMITS.keyword.test(d.keyword.trim())) e.keyword = S.wizard.keywordInvalid;
       if (d.counting === 'first_seen' && !inRange(d.purgeDays, LIMITS.purgeDays.min, LIMITS.purgeDays.max)) e.purgeDays = S.wizard.range(LIMITS.purgeDays.min, LIMITS.purgeDays.max);
       if (d.chatBonus.enabled) {
-        if (!inRange(d.chatBonus.sec, 1, 60)) e['chatBonus.sec'] = S.wizard.range(1, 60);
-        if (!inRange(d.chatBonus.minWords, 1, 50)) e['chatBonus.minWords'] = S.wizard.range(1, 50);
-        if (!inRange(d.chatBonus.cooldownSec, 0, 3600)) e['chatBonus.cooldownSec'] = S.wizard.range(0, 3600);
+        const c = LIMITS.chat;
+        if (!inRange(d.chatBonus.sec, c.sec.min, c.sec.max)) e['chatBonus.sec'] = S.wizard.range(c.sec.min, c.sec.max);
+        if (!inRange(d.chatBonus.minWords, c.minWords.min, c.minWords.max)) e['chatBonus.minWords'] = S.wizard.range(c.minWords.min, c.minWords.max);
+        if (!inRange(d.chatBonus.cooldownSec, c.cooldownSec.min, c.cooldownSec.max)) e['chatBonus.cooldownSec'] = S.wizard.range(c.cooldownSec.min, c.cooldownSec.max);
       }
       if (k) {
         for (const [key, f] of Object.entries(k.configSchema)) {

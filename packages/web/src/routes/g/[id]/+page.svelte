@@ -19,8 +19,12 @@
   </div>
   <h1>{g.prize}</h1>
   {#if g.sponsor}<span class="hint">{L.fields.sponsor}: {g.sponsor}</span>{/if}
-  <p>{S.portal.publicIntro}</p>
-  <a class="btn btn-primary" href={loginHref}>{L.actions.loginAndJoin}</a>
+  {#if data.me}
+    <p class="hint">{S.portal.publicNoPortal}</p>
+  {:else}
+    <p>{S.portal.publicIntro}</p>
+    <a class="btn btn-primary" href={loginHref}>{L.actions.loginAndJoin}</a>
+  {/if}
   {#if g.keyword}<span class="hint">{S.portal.keywordHint(g.keyword)}</span>{/if}
   <dl>
     <dt>{L.fields.winnersCount}</dt>
