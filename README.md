@@ -57,7 +57,10 @@ fachlichen Begriffe (Giveaway, Kern, Topf, Chance …) stehen in
 | **Identität** | Die Zeile in `identities`: `pid` ↔ Twitch-ID, Login, Anzeigename. Die einzige Stelle mit Twitch-Daten. Löschen entfernt sie, das Journal zeigt dann „gelöschter Teilnehmer #<kurz-id>“. |
 | **Sitzung** | Eine Zeile in `sessions` plus das Cookie `ccg_session` (HttpOnly, 30 Tage). Liegt in PostgreSQL, damit ein Redis-Ausfall niemanden abmeldet. |
 | **Kanal-Token** | Die Twitch-Tokens eines Streamers in `channel_tokens`, AES-256-GCM-verschlüsselt. Der Schlüssel liegt in der Datei aus `TOKEN_KEY_FILE`, nie in der Datenbank. |
-| **Solo-Team** | Das Team, das jeder Streamer beim ersten Anmelden automatisch bekommt (`soloTeamId` im Konto). Giveaways gehören einem Team. |
+| **Solo-Team** | Das Team, das jeder Streamer beim ersten Anmelden automatisch bekommt (`soloTeamId` im Konto). Giveaways gehören einem Team. Es hat keinen eigenen Strom, sein einziger Kanal ist der eigene. |
+| **Team** | Der Strom `team:<id>`: Name, Mitglieder, Einladungen, Sperren, aktiv oder deaktiviert. Entsteht über `POST /teams`, Beitritt per Einladungslink. Alle Mitglieder sind gleichberechtigt und steuern jedes Giveaway des Teams. Die Kanäle eines Giveaways sind Mitglieder des Teams. Deaktivieren verhindert neue Giveaways und Beitritte, löscht keine Nachweise, laufende Giveaways bleiben steuerbar. Das letzte Mitglied kann nicht austreten. |
+| **Einladung** | Ein Link `PUBLIC_URL/teams/join/<inviteId>`, 7 Tage gültig, mehrfach nutzbar, bis ein Mitglied ihn widerruft. Beitritt braucht ein vollständiges Konto (Nutzungsbedingungen, Kanal). |
+| **Sperre** | Team-weit: `POST /teams/:id/bans {pid}`. Eine gesperrte Person kann sich in keinem Giveaway des Teams anmelden, ihre Signale zählen nicht, die Ziehung schließt sie mit Grund `banned` aus. Aufheben über `DELETE /teams/:id/bans/:pid` oder Rückgängig. |
 | **Rechtstexte** | Impressum, Teilnahmebedingungen und Datenschutzhinweis. Je Giveaway oder im Profil. Beim Öffnen friert der Rahmen sie ein: Text als Kopie, URL mit SHA-256 des Inhalts (`giveaway_legal_frozen`). Ohne sie öffnet kein Giveaway. |
 | **Signal** | Was der Ingest von Twitch holt: Anwesenheit (wer ist im Chat, je Minute), Chat-Nachricht, Follow, Live-Status mit Zuschauerzahl. Signale tragen Twitch-Nutzer. Erst der Rahmen macht daraus `pid`s. |
 | **Bündel** | Alle Signale eines Kanals in einer Minute. Fließt 5 s nach Minutenende ab und wird je offenem Giveaway des Kanals ein Befehl `apply_signals` mit Akteur `system:ingest`. |
@@ -77,7 +80,7 @@ fachlichen Begriffe (Giveaway, Kern, Topf, Chance …) stehen in
 | **Zählweise** | Je Giveaway: „ab Anmeldung“ (nur angemeldete Teilnehmer sammeln) oder „ab erstem Erscheinen“ (jeder Anwesende bekommt eine `pid` und sammelt, gewinnen können nur Angemeldete). |
 | **Keyword** | Ein Wort im Chat (z. B. `!werwolf`), mit dem sich ein Zuschauer anmeldet. Erstes Wort der Nachricht, Groß- und Kleinschreibung egal. Dieselben Regeln wie der Knopf im Portal. |
 | **Löschfrist** | Unangemeldete `pid`s der Zählweise „ab erstem Erscheinen“ verlieren ihre Zuordnung Schließen + 7 Tage (einstellbar) nach dem Giveaway: Befehl `purge_unregistered`, Ereignis `unregistered_purged`, die `identities`-Zeile fällt. Nie, wenn die Person ein Konto hat, irgendwo angemeldet oder Gewinner ist oder in einem anderen laufenden Giveaway gesehen wurde. |
-| **Teilprojekt** | Ein Abschnitt des Neubaus mit eigenem Umsetzungsplan (NEW_DESIGN.md, Abschnitt 14). Teilprojekte 1 bis 6 (Fundament, Kern-Vertrag + Kern B, Konten + Identität, Ingest, Rahmen-Dienste + Kern A, Kern C Ticketkauf) sind fertig. |
+| **Teilprojekt** | Ein Abschnitt des Neubaus mit eigenem Umsetzungsplan (NEW_DESIGN.md, Abschnitt 14). Teilprojekte 1 bis 7 (Fundament, Kern-Vertrag + Kern B, Konten + Identität, Ingest, Rahmen-Dienste + Kern A, Kern C Ticketkauf, Teams) sind fertig. |
 
 ## Prozesse
 
@@ -88,6 +91,7 @@ Drei Prozesse aus `packages/server`:
   - `GET /auth/twitch/login?return=/pfad` → Twitch → `GET /auth/twitch/callback` setzt das Sitzungs-Cookie. `GET /auth/twitch/connect` verbindet den Kanal mit den Scopes `moderator:read:followers`, `moderator:read:chatters`, `channel:bot`. `POST /auth/logout`.
   - `GET /me`, `POST /me/terms {version}`, `PUT /me/profile {legal}`, `DELETE /me/channel`, `GET /me/channel` (Statusblock des eigenen Kanals), `GET /me/data` (JSON-Export, Eintrag im Zugriffslog), `DELETE /me` (Löschung).
   - `GET /auth/twitch/bot`: Anmeldung mit dem Bot-Konto, erteilt der App die Bot-Rechte (siehe „Bot einrichten“).
+  - Teams: `GET /me/teams`, `POST /teams {name}`, `GET /teams/:id` (nur Mitglieder), `PUT /teams/:id/name`, `POST /teams/:id/invites` → Einladungslink, `DELETE /teams/:id/invites/:inviteId`, `GET /teams/join/:inviteId` (ohne Sitzung: Name und Gültigkeit), `POST /teams/join/:inviteId`, `POST /teams/:id/leave|deactivate|reactivate`, `POST /teams/:id/bans {pid}`, `DELETE /teams/:id/bans/:pid`.
   - Ablehnungen antworten mit `{code, message}`: 401 ohne Sitzung, 403 fremde Person oder fremdes Team, 404 unbekannt, sonst 400.
   - Nur die App prüft Bedingungen bei der Ziehung (Helix mit dem Token des Streamers und App-Token). Scheduler und Ingest ziehen nicht.
 - **scheduler** (`npm run start:scheduler`): holt sich zuerst den Einzelinstanz-Lock. Ein zweiter Scheduler bricht mit Hinweis ab.
