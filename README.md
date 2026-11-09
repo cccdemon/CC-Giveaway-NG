@@ -7,9 +7,12 @@ Neubau der Giveaway-Plattform. Das Design steht in [NEW_DESIGN.md](NEW_DESIGN.md
 1. Node 24 und Docker installieren.
 2. `npm ci` ausführen.
 3. `docker compose -f docker-compose.dev.yml up -d` startet PostgreSQL und Redis.
-4. `.env.example` nach `.env` kopieren. Twitch-App unter https://dev.twitch.tv/console anlegen, Redirect-URL = `PUBLIC_URL` + `/auth/twitch/callback`.
+4. `.env.example` nach `.env` kopieren. Twitch-App unter https://dev.twitch.tv/console anlegen, Redirect-URL = `PUBLIC_URL` + `/api/auth/twitch/callback`.
+   `PUBLIC_URL` ist die Adresse der Web-App (Entwicklung: `http://localhost:3001`), `API_URL` die des app-Prozesses (`http://localhost:3000`).
    Schlüssel für Kanal-Tokens anlegen: `mkdir secrets && openssl rand -hex 32 > secrets/token.key`.
 5. `npm test` startet alle Tests. Die Tests starten eigene Container.
+6. Oberflächen: `npm run dev:app -w packages/server` (API auf 3000) und `npm run dev -w packages/web` (Web-App auf 3001, Vite leitet `/api` an die API weiter). Browser: http://localhost:3001.
+7. E2E: `npm run test:e2e` startet einen eigenen Stack (PostgreSQL per Testcontainers, Twitch-Stub, Web-App auf 3101) und fährt mit Playwright durch Anmeldung, Assistent, Ziehung, Rückgängig und Löschung. Einmalig `npx playwright install chromium` in `packages/web`.
 
 ## Begriffe
 
@@ -63,7 +66,7 @@ fachlichen Begriffe (Giveaway, Kern, Topf, Chance …) stehen in
 | **Sperre** | Team-weit: `POST /teams/:id/bans {pid}`. Eine gesperrte Person kann sich in keinem Giveaway des Teams anmelden, ihre Signale zählen nicht, die Ziehung schließt sie mit Grund `banned` aus. Aufheben über `DELETE /teams/:id/bans/:pid` oder Rückgängig. Die Zuordnung einer gesperrten Person bleibt über die Löschfristen hinaus erhalten, sonst käme sie mit neuer `pid` zurück. |
 | **Kontaktweg** | Feld `contact` der Giveaway-Einstellungen (höchstens 200 Zeichen): wie ein Gewinner den Streamer erreicht. Das Portal zeigt ihn mit der Meldefrist. |
 | **Live-Push** | Route `/ws`: Oberflächen abonnieren Ströme und bekommen je Ereignis nur `stream`, `seq`, `type`, `id`, `at`. Danach laden sie die Sicht neu. Quelle ist Redis Pub/Sub (`RedisSubscriber`), in Tests der `LocalBus`. |
-| **Text-Linter** | `npm run lint:text` prüft alle UI- und Fehlertexte im Quellcode (Regeln aus NEW_DESIGN.md 11.6): höchstens 20 Wörter je Satz, kein Semikolon, keine Werbewörter, kein Vorgangspassiv, Endsatzzeichen. Läuft in `npm run lint` und damit in der CI. |
+| **Text-Linter** | `npm run lint:text` prüft alle UI- und Fehlertexte im Quellcode (Regeln aus NEW_DESIGN.md 11.6): höchstens 20 Wörter je Satz, kein Semikolon, keine Werbewörter, kein Vorgangspassiv, Endsatzzeichen. In der Web-App prüft er `labels.ts` (Beschriftungen, höchstens 6 Wörter, ohne Satzzeichen-Pflicht) und `sentences.ts` (ganze Sätze). Läuft in `npm run lint` und damit in der CI. |
 | **Rechtstexte** | Impressum, Teilnahmebedingungen und Datenschutzhinweis. Je Giveaway oder im Profil. Beim Öffnen friert der Rahmen sie ein: Text als Kopie, URL mit SHA-256 des Inhalts (`giveaway_legal_frozen`). Ohne sie öffnet kein Giveaway. |
 | **Signal** | Was der Ingest von Twitch holt: Anwesenheit (wer ist im Chat, je Minute), Chat-Nachricht, Follow, Live-Status mit Zuschauerzahl. Signale tragen Twitch-Nutzer. Erst der Rahmen macht daraus `pid`s. |
 | **Bündel** | Alle Signale eines Kanals in einer Minute. Fließt 5 s nach Minutenende ab und wird je offenem Giveaway des Kanals ein Befehl `apply_signals` mit Akteur `system:ingest`. |
@@ -83,21 +86,29 @@ fachlichen Begriffe (Giveaway, Kern, Topf, Chance …) stehen in
 | **Zählweise** | Je Giveaway: „ab Anmeldung“ (nur angemeldete Teilnehmer sammeln) oder „ab erstem Erscheinen“ (jeder Anwesende bekommt eine `pid` und sammelt, gewinnen können nur Angemeldete). |
 | **Keyword** | Ein Wort im Chat (z. B. `!werwolf`), mit dem sich ein Zuschauer anmeldet. Erstes Wort der Nachricht, Groß- und Kleinschreibung egal. Dieselben Regeln wie der Knopf im Portal. |
 | **Löschfrist** | Unangemeldete `pid`s der Zählweise „ab erstem Erscheinen“ verlieren ihre Zuordnung Schließen + 7 Tage (einstellbar) nach dem Giveaway: Befehl `purge_unregistered`, Ereignis `unregistered_purged`, die `identities`-Zeile fällt. Nie, wenn die Person ein Konto hat, irgendwo angemeldet oder Gewinner ist oder in einem anderen laufenden Giveaway gesehen wurde. |
-| **Teilprojekt** | Ein Abschnitt des Neubaus mit eigenem Umsetzungsplan (NEW_DESIGN.md, Abschnitt 14). Teilprojekte 1 bis 7 (Fundament, Kern-Vertrag + Kern B, Konten + Identität, Ingest, Rahmen-Dienste + Kern A, Kern C Ticketkauf, Teams) und 8a (Giveaway-API, Portal-API, Live-Push, Text-Linter) sind fertig. Teilprojekt 8 ist geteilt: 8a Server, 8b Oberflächen, 8c Verwaltung. |
+| **Web-App** | Das Paket `packages/web` (SvelteKit, adapter-node, Port 3001): Streamer-App, Teilnehmer-Portal, öffentliche Giveaway-Seite. Spricht nur mit der API unter `/api` (same-origin, beim Server-Rendern über `API_URL`). Entwicklung über den Vite-Proxy, Produktion über Caddy (Teilprojekt 10). |
+| **Streamermodus** | Schalter im Kopfbereich der Web-App: maskiert jeden Teilnehmer-Namen als „Teilnehmer ·xxxx“ (erste vier Zeichen der `pid`), in Teilnehmerliste, Gewinnern, Verlauf und Sperren. Kanalnamen bleiben sichtbar. Liegt nur im Browser (`localStorage`). |
+| **Start-Assistent** | Sechs Schritte zum neuen Giveaway: Kern, Preis und Regeln, Kanäle, Bedingungen, Rechtstexte, Prüfen und öffnen. Prüft jeden Schritt vor dem Senden, Ablehnungen des Servers landen am passenden Schritt. |
+| **Live-Push-Client** | Die Web-App abonniert über `/api/ws` die Ströme der sichtbaren Seite und lädt bei jedem Ereignis die Daten des Stroms neu. Verbindet nach einem Abbruch mit Backoff (1 s bis 30 s) neu, bei Code 4401 (keine Sitzung) zurück zur Startseite. |
+| **Teilprojekt** | Ein Abschnitt des Neubaus mit eigenem Umsetzungsplan (NEW_DESIGN.md, Abschnitt 14). Teilprojekte 1 bis 7 (Fundament, Kern-Vertrag + Kern B, Konten + Identität, Ingest, Rahmen-Dienste + Kern A, Kern C Ticketkauf, Teams), 8a (Giveaway-API, Portal-API, Live-Push, Text-Linter) und 8b (SvelteKit-Oberflächen) sind fertig. Als Nächstes 8c (Verwaltung). |
 
 ## Prozesse
 
-Drei Prozesse aus `packages/server`:
+Drei Prozesse aus `packages/server` und die Web-App aus `packages/web`. Alle API-Routen liegen unter dem Präfix `/api`, nur `/healthz` an der Wurzel.
 
+- **web** (`npm run build -w packages/web`, dann `npm run start -w packages/web`): SvelteKit mit adapter-node, `PORT` (Default 3000, Entwicklung 3001), `API_URL` für das Server-Rendern. Hinter Caddy: `/api/*` und `/healthz` an `app`, alles andere an `web`; Caddy setzt `x-forwarded-proto` und `x-forwarded-host` (adapter-node liest `PROTOCOL_HEADER`, `HOST_HEADER`).
+  - Seiten: `/` (Anmelden), `/giveaways` (Übersicht), `/giveaways/new` (Start-Assistent), `/giveaways/:id` (Detail), `/giveaways/:id/history`, `/teams`, `/teams/:id`, `/teams/join/:inviteId`, `/channel`, `/legal`, `/terms`, `/portal`, `/portal/giveaways/:id`, `/portal/data`, `/g/:id` (öffentlich).
+  - Streamer-Seiten verlangen Sitzung und angenommene Nutzungsbedingungen (sonst `/terms`), Portal-Seiten nur die Sitzung.
+  - Alle UI-Texte stehen in `src/lib/texts/labels.ts` und `sentences.ts`, der Text-Linter prüft beide (`npm run lint:text -w packages/web`).
 - **app** (`npm run start:app`): HTTP-Server. Beim Start Migrationen, Partitionen und Kern-Versionsabgleich der Lesetabellen.
   - `GET /healthz`
-  - `GET /auth/twitch/login?return=/pfad` → Twitch → `GET /auth/twitch/callback` setzt das Sitzungs-Cookie. `GET /auth/twitch/connect` verbindet den Kanal mit den Scopes `moderator:read:followers`, `moderator:read:chatters`, `channel:bot`. `POST /auth/logout`.
+  - Alle folgenden Pfade mit Präfix `/api`: `GET /api/auth/twitch/login?return=/pfad` → Twitch → `GET /api/auth/twitch/callback` setzt das Sitzungs-Cookie. `GET /api/auth/twitch/connect` verbindet den Kanal mit den Scopes `moderator:read:followers`, `moderator:read:chatters`, `channel:bot`. `POST /api/auth/logout`.
   - `GET /me`, `POST /me/terms {version}`, `PUT /me/profile {legal}`, `DELETE /me/channel`, `GET /me/channel` (Statusblock des eigenen Kanals), `GET /me/data` (JSON-Export, Eintrag im Zugriffslog), `DELETE /me` (Löschung).
   - `GET /auth/twitch/bot`: Anmeldung mit dem Bot-Konto, erteilt der App die Bot-Rechte (siehe „Bot einrichten“).
   - Teams: `GET /me/teams`, `POST /teams {name}`, `GET /teams/:id` (nur Mitglieder), `PUT /teams/:id/name`, `POST /teams/:id/invites` → Einladungslink, `DELETE /teams/:id/invites/:inviteId`, `GET /teams/join/:inviteId` (ohne Sitzung: Name und Gültigkeit), `POST /teams/join/:inviteId`, `POST /teams/:id/leave|deactivate|reactivate`, `POST /teams/:id/bans {pid}`, `DELETE /teams/:id/bans/:pid`.
-  - Streamer-App: `GET /kernels` (Katalog für den Start-Assistenten), `GET /giveaways[?status=open,paused]` (Kacheln der eigenen Teams mit Kanalwarnungen), `GET /giveaways/:id` (Detail aus dem Zustand), `GET /giveaways/:id/participants` (Namen, Gewicht, Chance, Kern-Zeilen, Eintrag im Zugriffslog), `GET /giveaways/:id/history?beforeSeq&limit` (Verlauf neueste zuerst mit Umkehrart und Umkehrstatus). Befehle antworten `200 { events }`: `POST /giveaways` (201 mit `giveawayId`), `PUT /giveaways/:id/settings`, `POST /giveaways/:id/open|pause|resume|close|reopen|cancel|complete|draw`, `POST …/redraw {replace, reason}`, `PUT …/winners/:pid {status}`, `POST …/boost {factor, durationSec}`, `DELETE …/boost`, `POST …/corrections {channel, pid, sec, reason}`, `POST …/revert {eventId, reason}`, `POST …/kernel-commands {type, args}`.
+  - Streamer-App: `GET /kernels` (Katalog für den Start-Assistenten), `GET /giveaways[?status=open,paused]` (Kacheln der eigenen Teams mit Kanalwarnungen, `claimDays`, `drawnAt`, `winnerStatuses`), `GET /giveaways/:id` (Detail aus dem Zustand, mit `drawnAt` und dem gültigen Ziehungsnachweis `draw`), `GET /giveaways/:id/participants` (Namen, Gewicht, Chance, Kern-Zeilen, Eintrag im Zugriffslog), `GET /giveaways/:id/history?beforeSeq&limit` (Verlauf neueste zuerst mit Umkehrart, Umkehrstatus und `names` für pids in den Payloads). Befehle antworten `200 { events }`: `POST /giveaways` (201 mit `giveawayId`), `PUT /giveaways/:id/settings`, `POST /giveaways/:id/open|pause|resume|close|reopen|cancel|complete|draw`, `POST …/redraw {replace, reason}`, `PUT …/winners/:pid {status}`, `POST …/boost {factor, durationSec}`, `DELETE …/boost`, `POST …/corrections {channel, pid, sec, reason}`, `POST …/revert {eventId, reason}`, `POST …/kernel-commands {type, args}`.
   - Teilnehmer-Portal: `GET /public/giveaways/:id` (ohne Sitzung, ohne Teilnehmer-pids), `GET /portal/giveaways` (eigene Beteiligungen mit Chance), `GET /portal/giveaways/:id` (eigene Sicht, Bedingungen, Gewinn mit Meldefrist und Kontaktweg), `GET /portal/giveaways/:id/gates` (Bedingungsstatus live, 502 wenn Twitch nicht antwortet), `POST /portal/giveaways/:id/register|withdraw`, `POST /portal/giveaways/:id/kernel-commands {type, args}` (pid aus der Sitzung).
-  - Live-Push: `GET /ws` (WebSocket, Sitzung Pflicht). Client sendet `{ "subscribe": ["giveaway:<id>"] }` oder `{ "unsubscribe": [...] }`, Server antwortet `{ subscribed }`, `{ unsubscribed }` oder `{ error: { code, message, stream } }` und schickt je Ereignis `{ event: { stream, seq, type, id, at } }` ohne Payload. Rechte je Strom wie bei den Lese-Routen, Teilnehmer dürfen Giveaways mit Beteiligung oder im Zustand Offen. Ping alle 30 s. Fällt Redis aus, schließt die App alle Verbindungen mit Code 1012, die Oberfläche verbindet neu.
+  - Live-Push: `GET /api/ws` (WebSocket, Sitzung Pflicht). Client sendet `{ "subscribe": ["giveaway:<id>"] }` oder `{ "unsubscribe": [...] }`, Server antwortet `{ subscribed }`, `{ unsubscribed }` oder `{ error: { code, message, stream } }` und schickt je Ereignis `{ event: { stream, seq, type, id, at } }` ohne Payload. Rechte je Strom wie bei den Lese-Routen, Teilnehmer dürfen Giveaways mit Beteiligung oder im Zustand Offen. Ping alle 30 s. Fällt Redis aus, schließt die App alle Verbindungen mit Code 1012, die Oberfläche verbindet neu.
   - Ablehnungen antworten mit `{code, message}`: 401 ohne Sitzung, 403 fremde Person oder fremdes Team, 404 unbekannt, 502 wenn Twitch nicht antwortet, sonst 400.
   - Nur die App prüft Bedingungen bei der Ziehung (Helix mit dem Token des Streamers und App-Token). Scheduler und Ingest ziehen nicht.
 - **scheduler** (`npm run start:scheduler`): holt sich zuerst den Einzelinstanz-Lock. Ein zweiter Scheduler bricht mit Hinweis ab.
@@ -117,7 +128,7 @@ Drei Prozesse aus `packages/server`:
 Der Twitch-Adapter liest Chat und sendet Ansagen über ein Bot-Konto des Betreibers.
 
 1. Ein Twitch-Konto für den Bot anlegen oder wählen.
-2. Mit diesem Konto bei Twitch angemeldet `PUBLIC_URL/auth/twitch/bot` öffnen und alle Rechte bestätigen.
+2. Mit diesem Konto bei Twitch angemeldet `PUBLIC_URL/api/auth/twitch/bot` öffnen und alle Rechte bestätigen.
 3. Die Twitch-ID des Bot-Kontos als `TWITCH_BOT_USER_ID` setzen (steht nach der Anmeldung in `GET /me/data` unter `identity.twitchId`).
 
 Ohne `TWITCH_BOT_USER_ID` startet der Ingest mit `INGEST_ADAPTER=twitch` nicht.
