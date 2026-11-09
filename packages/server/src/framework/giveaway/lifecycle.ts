@@ -8,6 +8,8 @@ import { validateConfig } from '../kernel-config.js';
 import type { KernelRegistry } from '../kernel-registry.js';
 import { checkLegal } from '../legal.js';
 import { makeRevertHandler, type RevertCommand, type RevertPrepared } from '../revert.js';
+import { TEAM_INACTIVE } from '../team/commands.js';
+import type { BanDirectory, TeamChannels, TeamDirectory } from '../team/directory.js';
 import { GIVEAWAY_NOT_FOUND, INVALID_ID, UUID_RE, authorizeControl, type GiveawayAuthorizer } from './authorize.js';
 import { checkGateConfig, type GateConfig } from './gates.js';
 import { KEYWORD_RE, PURGE_DAYS_MAX, PURGE_DAYS_MIN, SERVICE_DEFAULTS, chatBonusSchema, countingSchema, type ChatBonusSettings } from './services.js';
@@ -25,6 +27,17 @@ export interface GiveawayDeps {
   kernels: KernelRegistry;
   auth: GiveawayAuthorizer;
   reducer: StreamReducer<GiveawayState>;
+  /** Kanäle und Aktivität des Teams (NEW_DESIGN.md 9.3). Default anyChannels prüft nichts. */
+  teams: TeamDirectory;
+  /** Team-weite Sperren (NEW_DESIGN.md 15.3). Default noBans. */
+  bans: BanDirectory;
+}
+
+const CHANNEL_NOT_IN_TEAM = (): Rejection => reject('channel_not_in_team', 'Dieser Kanal gehört nicht zum Team.');
+
+/** Ein Kanal außerhalb der Team-Kanäle? Ohne Verzeichnis (null) keine Prüfung. */
+function outsideTeam(channels: Pid[], team: TeamChannels): boolean {
+  return team !== null && channels.some((ch) => !team.channels.has(ch));
 }
 
 export interface CreateGiveawayCmd {
@@ -139,14 +152,15 @@ function validIds(cmd: { giveawayId: unknown; teamId: unknown }): boolean {
   return typeof cmd.giveawayId === 'string' && UUID_RE.test(cmd.giveawayId) && typeof cmd.teamId === 'string' && UUID_RE.test(cmd.teamId);
 }
 
-export function createGiveawayHandler(d: GiveawayDeps): CommandHandler<CreateGiveawayCmd, GiveawayState> {
+export function createGiveawayHandler(d: GiveawayDeps): CommandHandler<CreateGiveawayCmd, GiveawayState, TeamChannels> {
   return {
     type: 'create_giveaway',
     streamOf: (cmd) => giveawayStream(cmd.giveawayId),
     reducer: d.reducer,
     // Ohne gültige IDs scheitert schon die Stromsperre (assertStreamId). Darum hier, vor der Sperre.
     authorize: (cmd, ctx, c) => (validIds(cmd) ? d.auth.controls(c, ctx.actor, cmd.teamId) : INVALID_ID()),
-    decide(state, cmd) {
+    prepare: async (c, cmd) => (validIds(cmd) ? d.teams.channelsOf(c, cmd.teamId) : null),
+    decide(state, cmd, _ctx, team) {
       if (!validIds(cmd)) return INVALID_ID();
       if (state.exists) return reject('already_exists', 'Dieses Giveaway gibt es schon.');
       if (!d.kernels.has(cmd.kernelId)) {
@@ -169,6 +183,8 @@ export function createGiveawayHandler(d: GiveawayDeps): CommandHandler<CreateGiv
         chatBonus: s.chatBonus ?? SERVICE_DEFAULTS.chatBonus,
       });
       if (isRejection(settings)) return settings;
+      if (team !== null && !team.active) return TEAM_INACTIVE();
+      if (outsideTeam(settings.channels, team)) return CHANNEL_NOT_IN_TEAM();
       return [
         {
           type: GIVEAWAY_EVENTS.created,
@@ -205,13 +221,14 @@ export function transitionHandler(d: GiveawayDeps, type: TransitionType): Comman
   };
 }
 
-export function changeSettingsHandler(d: GiveawayDeps): CommandHandler<ChangeSettingsCmd, GiveawayState> {
+export function changeSettingsHandler(d: GiveawayDeps): CommandHandler<ChangeSettingsCmd, GiveawayState, TeamChannels> {
   return {
     type: 'change_settings',
     streamOf: (cmd) => giveawayStream(cmd.giveawayId),
     reducer: d.reducer,
     authorize: authorizeControl(d.auth),
-    decide(state, cmd) {
+    prepare: async (c, _cmd, _ctx, _pre, state) => (state.exists ? d.teams.channelsOf(c, state.teamId) : null),
+    decide(state, cmd, _ctx, team) {
       if (!state.exists) return GIVEAWAY_NOT_FOUND();
       if (!SETTINGS_OPEN.includes(state.status)) {
         return SETTINGS_LOCKED();
@@ -235,6 +252,8 @@ export function changeSettingsHandler(d: GiveawayDeps): CommandHandler<ChangeSet
         chatBonus: s.chatBonus === undefined ? before.chatBonus : ({ ...before.chatBonus, ...(s.chatBonus as Partial<ChatBonusSettings>) } as ChatBonusSettings),
       });
       if (isRejection(after)) return after;
+      // Nur neu gesetzte Kanäle müssen zum Team gehören. Kanäle ausgetretener Mitglieder bleiben als Nachweis (Teilprojekt 7, Festlegung 5).
+      if (s.channels !== undefined && outsideTeam(after.channels, team)) return CHANNEL_NOT_IN_TEAM();
       if (canonicalJson(after) === canonicalJson(before)) return [];
       // Der eingefrorene Nachweis (9.4) darf nicht still von den sichtbaren Texten abweichen.
       if (state.status !== 'draft' && canonicalJson(after.legal) !== canonicalJson(before.legal)) {

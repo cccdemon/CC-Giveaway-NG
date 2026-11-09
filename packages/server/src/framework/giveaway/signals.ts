@@ -58,6 +58,8 @@ export interface ResolvedSignals {
   created: number;
   /** Der Kanal ist live und liefert Signale. */
   live: boolean;
+  /** Im Team gesperrte pids, aus allen Signalen entfernt (NEW_DESIGN.md 15.3). */
+  banned: Pid[];
 }
 
 export type ApplySignalsDeps = GiveawayDeps & { identities: IdentityResolver; activity: ChannelActivity };
@@ -73,12 +75,22 @@ interface Resolved {
   follows: { pid: Pid; at: string }[];
 }
 
-function resolveWith(cmd: ApplySignalsCmd, map: Map<string, Pid>): Resolved {
-  const pidOf = (u: SignalUser): Pid | undefined => map.get(u.id);
+/** Löst Nutzer zu pids auf und lässt Gesperrte weg: Sie bekommen weder Anmeldung noch Gutschrift noch Identität. */
+function resolveWith(cmd: ApplySignalsCmd, map: Map<string, Pid>, banned: ReadonlySet<Pid>): Resolved {
+  const pidOf = (u: SignalUser): Pid | undefined => {
+    const pid = map.get(u.id);
+    return pid !== undefined && !banned.has(pid) ? pid : undefined;
+  };
   return {
     presence: cmd.presence === null ? null : [...new Set(cmd.presence.map(pidOf).filter((p): p is Pid => p !== undefined))],
-    chat: cmd.chat.flatMap((x) => (map.has(x.user.id) ? [{ pid: map.get(x.user.id)!, at: x.at, text: x.text, messageId: x.messageId }] : [])),
-    follows: cmd.follows.flatMap((x) => (map.has(x.user.id) ? [{ pid: map.get(x.user.id)!, at: x.at }] : [])),
+    chat: cmd.chat.flatMap((x) => {
+      const pid = pidOf(x.user);
+      return pid === undefined ? [] : [{ pid, at: x.at, text: x.text, messageId: x.messageId }];
+    }),
+    follows: cmd.follows.flatMap((x) => {
+      const pid = pidOf(x.user);
+      return pid === undefined ? [] : [{ pid, at: x.at }];
+    }),
   };
 }
 
@@ -228,12 +240,13 @@ export function applySignalsHandler(d: ApplySignalsDeps): CommandHandler<ApplySi
       const ids = users.map((u) => u.id);
       const map = await d.identities.resolve(c, ids);
       const live = (await d.activity.active(c, [cmd.channel], ctx.now)).has(cmd.channel);
+      const banned = state.exists ? await d.bans.bannedOf(c, state.teamId) : new Set<Pid>();
       let created = 0;
       // Eine Identität bekommt nur, wer in diesem Befehl eine Anmeldung oder Gutschrift bekäme (6.1: „Für andere entsteht keine pid“).
       if (state.exists && state.status === 'open' && state.settings.channels.includes(cmd.channel)) {
         const unknown = users.filter((u) => !map.has(u.id));
         const trial = new Map([...map, ...unknown.map((u): [string, Pid] => [u.id, `${UNKNOWN_PREFIX}${u.id}`])]);
-        const planned = pidsIn(planSignals(state, d.kernels.get(state.kernelId), cmd.channel, cmd.minute, resolveWith(cmd, trial), live));
+        const planned = pidsIn(planSignals(state, d.kernels.get(state.kernelId), cmd.channel, cmd.minute, resolveWith(cmd, trial, banned), live));
         const toCreate = unknown.filter((u) => planned.has(`${UNKNOWN_PREFIX}${u.id}`));
         if (toCreate.length > 0) {
           const made = await d.identities.create(c, toCreate, ctx.now);
@@ -241,9 +254,9 @@ export function applySignalsHandler(d: ApplySignalsDeps): CommandHandler<ApplySi
           created = made.size;
         }
       }
-      const resolved = resolveWith(cmd, map);
+      const resolved = resolveWith(cmd, map, banned);
       await d.identities.touch(c, resolved.presence ?? [], ctx.now);
-      return { ...resolved, unknown: ids.filter((id) => !map.has(id)).length, created, live };
+      return { ...resolved, unknown: ids.filter((id) => !map.has(id)).length, created, live, banned: [...banned].sort() };
     },
     decide(state, cmd, _ctx, p) {
       if (!state.exists) return GIVEAWAY_NOT_FOUND();

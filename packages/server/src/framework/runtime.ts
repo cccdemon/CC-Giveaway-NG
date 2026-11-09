@@ -64,6 +64,7 @@ import {
   type TeamAuthorizer,
   type TeamCmd,
 } from './team/commands.js';
+import { anyChannels, noBans, type BanDirectory, type TeamChannels, type TeamDirectory } from './team/directory.js';
 import { registerTeamEvents } from './team/events.js';
 import { teamsProjector } from './team/projectors.js';
 import { teamReducer, type TeamState } from './team/state.js';
@@ -87,6 +88,10 @@ export interface RuntimeOptions {
   activity?: ChannelActivity;
   /** Rechte der Team-Befehle (NEW_DESIGN.md 9.3). Default: alle dürfen (Tests). */
   teamAuth?: TeamAuthorizer;
+  /** Kanäle und Aktivität eines Teams für create_giveaway/change_settings. Default: keine Prüfung. */
+  teamDirectory?: TeamDirectory;
+  /** Team-weite Sperren für Anmeldung, Signale und Ziehung. Default: keine. */
+  bans?: BanDirectory;
 }
 
 type Handler<C, P = undefined, Q = undefined> = CommandHandler<C, GiveawayState, P, Q>;
@@ -115,7 +120,7 @@ export interface Runtime {
   teamReducer: StreamReducer<TeamState>;
   teams: TeamHandlers;
   handlers: {
-    create: Handler<CreateGiveawayCmd>;
+    create: Handler<CreateGiveawayCmd, TeamChannels>;
     open: Handler<GiveawayCmd, OpenPrepared, OpenPre>;
     pause: Handler<GiveawayCmd>;
     resume: Handler<GiveawayCmd>;
@@ -123,8 +128,8 @@ export interface Runtime {
     reopen: Handler<GiveawayCmd>;
     cancel: Handler<GiveawayCmd>;
     complete: Handler<GiveawayCmd>;
-    changeSettings: Handler<ChangeSettingsCmd>;
-    register: Handler<RegisterCmd>;
+    changeSettings: Handler<ChangeSettingsCmd, TeamChannels>;
+    register: Handler<RegisterCmd, Set<string>>;
     withdraw: Handler<RegisterCmd>;
     kernelCommand: Handler<KernelCommandCmd>;
     revert: Handler<RevertCommand, RevertPrepared>;
@@ -159,7 +164,7 @@ export function createRuntime(o: RuntimeOptions): Runtime {
     log: o.log,
     ...(o.snapshotEvery === undefined ? {} : { snapshotEvery: o.snapshotEvery }),
   });
-  const d: GiveawayDeps = { kernels, auth: o.auth, reducer };
+  const d: GiveawayDeps = { kernels, auth: o.auth, reducer, teams: o.teamDirectory ?? anyChannels, bans: o.bans ?? noBans };
   const loadState = (c: Queryable, stream: string) => loadStreamState(c, registry, stream, reducer);
   const dd: DrawDeps = { ...d, gates: o.gates ?? noGates, rng: o.rng ?? csprng, loadState };
   const od = { ...d, legalSource: o.legalSource ?? noProfile, fetcher: o.fetcher ?? fetchHash, loadState };

@@ -3,6 +3,7 @@ import type pg from 'pg';
 import type { Pid } from '../../kernel-api/index.js';
 import { reject, type Rejection } from '../../shared/rejection.js';
 import type { CommandContext, CommandHandler } from '../command-bus.js';
+import { BANNED } from '../team/commands.js';
 import { GIVEAWAY_NOT_FOUND, UUID_RE, authorizeSelf, loadGiveawayRow } from './authorize.js';
 import type { GiveawayDeps } from './lifecycle.js';
 import { GIVEAWAY_EVENTS, giveawayStream, type GiveawayState, type GiveawayStatus } from './state.js';
@@ -24,15 +25,17 @@ async function authorizeRegistration(cmd: RegisterCmd, ctx: CommandContext, c: p
   return authorizeSelf(cmd.pid, ctx.actor);
 }
 
-export function registerHandler(d: GiveawayDeps): CommandHandler<RegisterCmd, GiveawayState> {
+export function registerHandler(d: GiveawayDeps): CommandHandler<RegisterCmd, GiveawayState, Set<Pid>> {
   return {
     type: 'register',
     streamOf: (cmd) => giveawayStream(cmd.giveawayId),
     reducer: d.reducer,
     authorize: authorizeRegistration,
-    decide(state, cmd, ctx) {
+    prepare: async (c, _cmd, _ctx, _pre, state) => (state.exists ? d.bans.bannedOf(c, state.teamId) : new Set<Pid>()),
+    decide(state, cmd, ctx, banned) {
       if (!state.exists) return GIVEAWAY_NOT_FOUND();
       if (state.status !== 'open') return reject('not_open', 'Das Giveaway nimmt gerade keine Anmeldungen an.');
+      if (banned.has(cmd.pid)) return BANNED();
       if (state.registered[cmd.pid]) return reject('already_registered', 'Du bist schon angemeldet.');
       const gate = d.kernels.get(state.kernelId).gateRegistration?.(state.kernelState, state.settings.config, ctx.now.toISOString());
       if (gate) return gate;

@@ -5,7 +5,9 @@ import { createPool } from '../db/pool.js';
 import type { BusLogger } from '../framework/command-bus.js';
 import { denyUsers } from '../framework/giveaway/authorize.js';
 import { RedisPublisher } from '../framework/publisher.js';
+import { denyUsersTeams } from '../framework/team/commands.js';
 import { accountLegalSource } from '../identity/account/legal-source.js';
+import { pgBanDirectory, pgTeamDirectory } from '../identity/team-directory.js';
 import { loadTokenKey } from '../identity/crypto.js';
 import { identityResolver } from '../identity/resolver.js';
 import { pgChannelActivity } from '../ingest/channel-status.js';
@@ -48,7 +50,10 @@ async function main() {
     await migratePool.end();
   }
   const redis = new Redis(config.redisUrl);
-  const rt = createRuntime({ pool, publisher: new RedisPublisher(redis), auth: denyUsers, legalSource: accountLegalSource(), identities: identityResolver(), activity: pgChannelActivity(), log });
+  const rt = createRuntime({
+    pool, publisher: new RedisPublisher(redis), auth: denyUsers, legalSource: accountLegalSource(), identities: identityResolver(), activity: pgChannelActivity(), log,
+    teamAuth: denyUsersTeams, teamDirectory: pgTeamDirectory(), bans: pgBanDirectory(),
+  });
   const accounts = attachAccounts(rt, { tokenKey });
 
   const maintenance = async () => {

@@ -3,8 +3,10 @@ import type { Queryable } from '../../db/pool.js';
 import type { Pid } from '../../kernel-api/index.js';
 
 /** Kanäle eines Teams = pids seiner Mitglieder, beim Solo-Team die eigene pid. null = unbekanntes Team. */
+export type TeamChannels = { channels: Set<Pid>; active: boolean } | null;
+
 export interface TeamDirectory {
-  channelsOf(db: Queryable, teamId: string): Promise<{ channels: Set<Pid>; active: boolean } | null>;
+  channelsOf(db: Queryable, teamId: string): Promise<TeamChannels>;
 }
 
 /** Kein Verzeichnis: keine Prüfung der Kanäle (Tests, Systemprozesse ohne Konten). */

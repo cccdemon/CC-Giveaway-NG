@@ -5,7 +5,8 @@ import { createPool } from '../db/pool.js';
 import { reconcileKernelVersions } from '../framework/giveaway/projectors.js';
 import { RedisPublisher } from '../framework/publisher.js';
 import { createRuntime } from '../framework/runtime.js';
-import { accountAuthorizer } from '../identity/account/authorizer.js';
+import { accountAuthorizer, accountTeamAuthorizer } from '../identity/account/authorizer.js';
+import { pgBanDirectory, pgTeamDirectory } from '../identity/team-directory.js';
 import { accountLegalSource } from '../identity/account/legal-source.js';
 import { loadTokenKey } from '../identity/crypto.js';
 import { identityResolver } from '../identity/resolver.js';
@@ -40,6 +41,7 @@ async function main() {
   const rt = createRuntime({
     pool, publisher: new RedisPublisher(redis), auth: accountAuthorizer(), legalSource: accountLegalSource(), identities: identityResolver(),
     activity: pgChannelActivity(), gates: helixGateChecker({ helix, tokens }), log,
+    teamAuth: accountTeamAuthorizer(), teamDirectory: pgTeamDirectory(), bans: pgBanDirectory(),
   });
   const accounts = attachAccounts(rt, { tokenKey });
   const app = buildApp(
