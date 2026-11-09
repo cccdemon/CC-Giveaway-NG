@@ -67,8 +67,33 @@ export interface GiveawayDetail {
   channels: NamedChannelStatus[];
   /** Zeitpunkt der gültigen Ziehung, null ohne. Meldefrist = drawnAt + claimDays (NEW_DESIGN.md 7.3). */
   drawnAt: string | null;
+  /** Der gültige Ziehungsnachweis (NEW_DESIGN.md 7.2 Schritt 5), null ohne Ziehung. */
+  draw: DrawProof | null;
   closedAt: string | null;
   purgedAt: string | null;
+}
+
+export interface DrawProof {
+  eventId: string;
+  at: string;
+  mode: string;
+  winners: Pid[];
+  pool: { pid: Pid; weight: number }[];
+  gates: { pid: Pid; ok: boolean; reasons: string[] }[];
+  excluded: Pid[];
+  /** Zufallswerte der Ziehung, einer je gezogenem Gewinner. */
+  random: number[];
+  poolHash: string;
+}
+
+/** Nachweis der gültigen (nicht aufgehobenen) Ziehung aus dem Journal, null ohne Ziehung. */
+export async function drawProofOf(c: Queryable, registry: EventTypeRegistry, state: GiveawayState): Promise<DrawProof | null> {
+  const draw = [...state.draws].reverse().find((d) => !d.voided);
+  if (!draw) return null;
+  const e = await readEvent(c, registry, draw.eventId);
+  if (!e) return null;
+  const p = e.payload as Omit<DrawProof, 'eventId' | 'at'>;
+  return { eventId: e.id, at: e.createdAt.toISOString(), mode: p.mode, winners: p.winners, pool: p.pool, gates: p.gates, excluded: p.excluded, random: p.random, poolHash: p.poolHash };
 }
 
 /** Zeitpunkt der gültigen (nicht aufgehobenen) Ziehung aus dem Journal, null ohne Ziehung. */
@@ -83,10 +108,10 @@ export async function giveawayDetail(c: Queryable, rt: Runtime, id: string, stat
   const kernel = rt.kernels.get(state.kernelId);
   const pool = kernel.pool(state.kernelState, state.settings.config);
   const winnerPids = Object.keys(state.winners);
-  const [names, statuses, drawnAt] = await Promise.all([
+  const [names, statuses, draw] = await Promise.all([
     displayNamesOf(c, [...state.settings.channels, ...winnerPids]),
     channelStatusView(c, state.settings.channels, now),
-    drawnAtOf(c, rt.registry, state),
+    drawProofOf(c, rt.registry, state),
   ]);
   const channels = statuses.map((v) => ({ ...v, displayName: names.get(v.pid) ?? displayNameOf(null, v.pid) }));
   return {
@@ -103,7 +128,8 @@ export async function giveawayDetail(c: Queryable, rt: Runtime, id: string, stat
     winners: winnerPids.sort().map((pid) => ({ pid, displayName: names.get(pid) ?? displayNameOf(null, pid), status: state.winners[pid]! })),
     draws: state.draws,
     channels,
-    drawnAt,
+    drawnAt: draw?.at ?? null,
+    draw,
     closedAt: state.closedAt,
     purgedAt: state.purgedAt,
   };

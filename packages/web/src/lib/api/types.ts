@@ -169,8 +169,23 @@ export interface GiveawayDetail {
   draws: DrawRecord[];
   channels: NamedChannelStatus[];
   drawnAt: string | null;
+  /** Der gültige Ziehungsnachweis, null ohne Ziehung. */
+  draw: DrawProof | null;
   closedAt: string | null;
   purgedAt: string | null;
+}
+
+export interface DrawProof {
+  eventId: string;
+  at: string;
+  mode: string;
+  winners: string[];
+  pool: { pid: string; weight: number }[];
+  gates: { pid: string; ok: boolean; reasons: string[] }[];
+  excluded: string[];
+  /** Zufallswerte der Ziehung, einer je gezogenem Gewinner. */
+  random: number[];
+  poolHash: string;
 }
 
 export interface ParticipantView {

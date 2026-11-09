@@ -352,3 +352,29 @@ describe('Giveaway-API (Erweiterungen für die Oberflächen, Teilprojekt 8b)', (
     expect(onlyCreated.names).toEqual({ [alice.pid]: 'Alice' });
   });
 });
+
+describe('Giveaway-API (Ziehungsnachweis im Detail, Teilprojekt 8b)', () => {
+  it('detail carries the valid draw as proof: winners, pool, gates per pid, excluded, random and at', async () => {
+    const api = await setup();
+    const alice = await complete(api, ALICE);
+    const bob = await complete(api, BOB);
+    await openGiveaway(api, alice, GID_A);
+    expect((await get(api, `/api/giveaways/${GID_A}`, alice.cookie)).json().draw).toBeNull();
+    await must(api, api.rt.handlers.kernelCommand, { giveawayId: GID_A, command: { type: 'open_window', args: {} } }, alice.actor);
+    await must(api, api.rt.handlers.register, { giveawayId: GID_A, pid: bob.pid }, bob.actor);
+    await must(api, api.rt.handlers.close, { giveawayId: GID_A }, alice.actor);
+    const [drawn] = await must(api, api.rt.handlers.draw, { giveawayId: GID_A }, alice.actor);
+    const d = (await get(api, `/api/giveaways/${GID_A}`, alice.cookie)).json();
+    expect(d.draw).toEqual({
+      eventId: drawn!.id,
+      at: drawn!.createdAt.toISOString(),
+      mode: 'equal',
+      winners: [bob.pid],
+      pool: [{ pid: bob.pid, weight: 1 }],
+      gates: [{ pid: bob.pid, ok: true, reasons: [] }],
+      excluded: [],
+      random: [expect.any(Number)],
+      poolHash: expect.any(String),
+    });
+  });
+});
