@@ -43,6 +43,30 @@ import { ProjectionRegistry } from './projections.js';
 import { loadStreamState } from './state.js';
 import type { Publisher } from './publisher.js';
 import type { RevertCommand, RevertPrepared } from './revert.js';
+import {
+  allowAllTeams,
+  banParticipantHandler,
+  createInviteHandler,
+  createTeamHandler,
+  deactivateTeamHandler,
+  joinTeamHandler,
+  leaveTeamHandler,
+  reactivateTeamHandler,
+  renameTeamHandler,
+  revokeInviteHandler,
+  teamRevertHandler,
+  unbanParticipantHandler,
+  type CreateTeamCmd,
+  type InviteCmd,
+  type JoinTeamCmd,
+  type MemberCmd,
+  type RenameTeamCmd,
+  type TeamAuthorizer,
+  type TeamCmd,
+} from './team/commands.js';
+import { registerTeamEvents } from './team/events.js';
+import { teamsProjector } from './team/projectors.js';
+import { teamReducer, type TeamState } from './team/state.js';
 
 export interface RuntimeOptions {
   pool: pg.Pool;
@@ -61,9 +85,26 @@ export interface RuntimeOptions {
   identities?: IdentityResolver;
   /** Welche Kanäle live sind und Signale liefern (NEW_DESIGN.md 6.2, 6.3). Default: keiner. */
   activity?: ChannelActivity;
+  /** Rechte der Team-Befehle (NEW_DESIGN.md 9.3). Default: alle dürfen (Tests). */
+  teamAuth?: TeamAuthorizer;
 }
 
 type Handler<C, P = undefined, Q = undefined> = CommandHandler<C, GiveawayState, P, Q>;
+type TeamHandler<C> = CommandHandler<C, TeamState>;
+
+export interface TeamHandlers {
+  create: TeamHandler<CreateTeamCmd>;
+  rename: TeamHandler<RenameTeamCmd>;
+  createInvite: TeamHandler<InviteCmd>;
+  revokeInvite: TeamHandler<InviteCmd>;
+  join: TeamHandler<JoinTeamCmd>;
+  leave: TeamHandler<MemberCmd>;
+  deactivate: TeamHandler<TeamCmd>;
+  reactivate: TeamHandler<TeamCmd>;
+  ban: TeamHandler<MemberCmd>;
+  unban: TeamHandler<MemberCmd>;
+  revert: CommandHandler<RevertCommand, TeamState, RevertPrepared>;
+}
 
 export interface Runtime {
   kernels: KernelRegistry;
@@ -71,6 +112,8 @@ export interface Runtime {
   projections: ProjectionRegistry;
   bus: CommandBus;
   reducer: StreamReducer<GiveawayState>;
+  teamReducer: StreamReducer<TeamState>;
+  teams: TeamHandlers;
   handlers: {
     create: Handler<CreateGiveawayCmd>;
     open: Handler<GiveawayCmd, OpenPrepared, OpenPre>;
@@ -100,11 +143,13 @@ export function createRuntime(o: RuntimeOptions): Runtime {
   const kernels = o.kernels ?? defaultKernels();
   const registry = new EventTypeRegistry();
   registerGiveawayEvents(registry, kernels);
+  registerTeamEvents(registry);
   const projections = new ProjectionRegistry();
   // Reihenfolge zählt: giveaway_participants verweist per Fremdschlüssel auf giveaways.
   projections.registerState(giveawaysProjector(kernels));
   projections.registerState(participantsProjector(kernels));
   projections.registerState(timersProjector(kernels));
+  projections.registerState(teamsProjector());
   const reducer = makeGiveawayReducer(kernels);
   const bus = new CommandBus({
     pool: o.pool,
@@ -119,12 +164,27 @@ export function createRuntime(o: RuntimeOptions): Runtime {
   const dd: DrawDeps = { ...d, gates: o.gates ?? noGates, rng: o.rng ?? csprng, loadState };
   const od = { ...d, legalSource: o.legalSource ?? noProfile, fetcher: o.fetcher ?? fetchHash, loadState };
   const activity = o.activity ?? noActivity;
+  const teamAuth = o.teamAuth ?? allowAllTeams;
   return {
     kernels,
     registry,
     projections,
     bus,
     reducer,
+    teamReducer,
+    teams: {
+      create: createTeamHandler(teamAuth),
+      rename: renameTeamHandler(teamAuth),
+      createInvite: createInviteHandler(teamAuth),
+      revokeInvite: revokeInviteHandler(teamAuth),
+      join: joinTeamHandler(teamAuth),
+      leave: leaveTeamHandler(teamAuth),
+      deactivate: deactivateTeamHandler(teamAuth),
+      reactivate: reactivateTeamHandler(teamAuth),
+      ban: banParticipantHandler(teamAuth),
+      unban: unbanParticipantHandler(teamAuth),
+      revert: teamRevertHandler(registry, teamAuth),
+    },
     handlers: {
       create: createGiveawayHandler(d),
       open: openGiveawayHandler(od),
