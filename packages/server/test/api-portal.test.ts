@@ -181,6 +181,33 @@ describe('Portal-API', () => {
     expect(down.json()).toEqual({ code: 'twitch_unreachable', message: 'Twitch antwortet nicht. Versuche es gleich noch einmal.' });
   });
 
+  it('GET gates follows the detail rule: uninvolved on a closed or draft giveaway → 404, involved → 200', async () => {
+    const { api, gates } = await setup();
+    const alice = await complete(api, ALICE);
+    const bob = await complete(api, BOB);
+    const carol = await complete(api, CAROL);
+    await openInstant(api, alice, GID_A);
+    await must(api, api.rt.handlers.create, { giveawayId: GID_B, teamId: alice.soloTeamId, kernelId: 'instant', settings: { prize: 'Key', channels: [alice.pid] } }, alice.actor);
+    await post(api, `/portal/giveaways/${GID_A}/register`, bob.cookie);
+    await must(api, api.rt.handlers.close, { giveawayId: GID_A }, alice.actor);
+    expect((await get(api, `/portal/giveaways/${GID_A}/gates`, carol.cookie)).statusCode).toBe(404);
+    expect((await get(api, `/portal/giveaways/${GID_B}/gates`, carol.cookie)).statusCode).toBe(404);
+    expect((await get(api, `/portal/giveaways/${GID_A}/gates`, bob.cookie)).statusCode).toBe(200);
+    expect(gates.calls).toEqual([{ pids: [bob.pid] }]);
+  });
+
+  it('GET /public/giveaways/:id hides drafts (404) but shows closed, drawn and cancelled giveaways', async () => {
+    const { api } = await setup();
+    const alice = await complete(api, ALICE);
+    await must(api, api.rt.handlers.create, { giveawayId: GID_B, teamId: alice.soloTeamId, kernelId: 'instant', settings: { prize: 'Key', channels: [alice.pid] } }, alice.actor);
+    expect((await get(api, `/public/giveaways/${GID_B}`)).statusCode).toBe(404);
+    await openInstant(api, alice, GID_A);
+    await must(api, api.rt.handlers.cancel, { giveawayId: GID_A }, alice.actor);
+    const r = await get(api, `/public/giveaways/${GID_A}`);
+    expect(r.statusCode).toBe(200);
+    expect(r.json().status).toBe('cancelled');
+  });
+
   it('portal kernel command buys tickets for the session pid, not for another pid in the body', async () => {
     const { api } = await setup();
     const alice = await complete(api, ALICE);

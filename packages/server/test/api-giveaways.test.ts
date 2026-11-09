@@ -1,5 +1,5 @@
 import type { InjectOptions } from 'fastify';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CommandHandler, CommandResult } from '../src/framework/command-bus.js';
 import { GIVEAWAY_EVENTS, giveawayStream, type GiveawayState } from '../src/framework/giveaway/state.js';
 import { INSTANT_EVENTS } from '../src/kernels/instant/index.js';
@@ -114,6 +114,29 @@ describe('Giveaway-API (Lesen)', () => {
     expect((await get(api, `/giveaways/${UNKNOWN}`, alice.cookie)).statusCode).toBe(404);
     expect((await get(api, '/giveaways/nope', alice.cookie)).statusCode).toBe(404);
     expect((await api.app.inject({ method: 'GET', url: `/giveaways/${GID_A}` })).statusCode).toBe(401);
+  });
+
+  it('a foreign user gets 403 before any replay of the stream; the detail logs view_detail only when it shows winners', async () => {
+    const api = await setup();
+    const alice = await complete(api, ALICE);
+    const bob = await complete(api, BOB);
+    await openGiveaway(api, alice, GID_A);
+    const apply = vi.spyOn(api.rt.reducer, 'apply');
+    expect((await get(api, `/giveaways/${GID_A}`, bob.cookie)).statusCode).toBe(403);
+    expect((await get(api, `/giveaways/${GID_A}/participants`, bob.cookie)).statusCode).toBe(403);
+    expect((await get(api, `/giveaways/${GID_A}/history`, bob.cookie)).statusCode).toBe(403);
+    expect(apply).not.toHaveBeenCalled();
+    apply.mockRestore();
+    expect((await get(api, `/giveaways/${GID_A}`, alice.cookie)).statusCode).toBe(200);
+    const none = await api.pool.query('SELECT count(*)::int AS n FROM access_log WHERE kind = $1 AND action = $2', ['read', 'view_detail']);
+    expect(none.rows[0]!.n).toBe(0);
+    await must(api, api.rt.handlers.kernelCommand, { giveawayId: GID_A, command: { type: 'open_window', args: {} } }, alice.actor);
+    await must(api, api.rt.handlers.register, { giveawayId: GID_A, pid: bob.pid }, bob.actor);
+    await must(api, api.rt.handlers.close, { giveawayId: GID_A }, alice.actor);
+    await must(api, api.rt.handlers.draw, { giveawayId: GID_A }, alice.actor);
+    expect((await get(api, `/giveaways/${GID_A}`, alice.cookie)).json().winners).toEqual([{ pid: bob.pid, displayName: 'Bob', status: 'pending' }]);
+    const logged = await api.pool.query('SELECT actor, action, target FROM access_log WHERE kind = $1 AND action = $2', ['read', 'view_detail']);
+    expect(logged.rows).toEqual([{ actor: alice.actor, action: 'view_detail', target: giveawayStream(GID_A) }]);
   });
 
   it('GET /giveaways/:id/participants returns names, weights, chance and kernel lines, writes view_participants; foreign team → 403 without log', async () => {

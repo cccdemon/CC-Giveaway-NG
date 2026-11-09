@@ -5,7 +5,7 @@ import type pg from 'pg';
 import { logRead } from '../audit/access-log.js';
 import { UUID_RE } from '../framework/authorize.js';
 import type { CommandHandler } from '../framework/command-bus.js';
-import { GIVEAWAY_NOT_FOUND } from '../framework/giveaway/authorize.js';
+import { GIVEAWAY_NOT_FOUND, loadGiveawayRow } from '../framework/giveaway/authorize.js';
 import type { ChangeSettingsCmd, CreateGiveawayCmd, GiveawayCmd } from '../framework/giveaway/lifecycle.js';
 import { giveawayStream, type GiveawayState, type GiveawayStatus, type WinnerStatus } from '../framework/giveaway/state.js';
 import { channelStatusView } from '../ingest/status-view.js';
@@ -38,20 +38,21 @@ export function registerGiveawayRoutes(app: FastifyInstance, deps: ApiDeps, pool
   const send = (reply: FastifyReply, h: { status: number; body: unknown }) => reply.code(h.status).send(h.body);
   const notFound = (reply: FastifyReply) => send(reply, rejectionToHttp(GIVEAWAY_NOT_FOUND()));
 
-  /** Lädt das Giveaway und prüft die Team-Rechte der Sitzung. Antwortet selbst bei 404/403 und liefert dann null. */
+  /** Prüft die Team-Rechte der Sitzung über die Lesetabelle und lädt erst dann den Zustand (Replay). Antwortet selbst bei 404/403 und liefert dann null. */
   const withGiveaway = async (req: FastifyRequest<IdParams>, reply: FastifyReply, c: pg.PoolClient) => {
-    if (!UUID_RE.test(req.params.id)) {
+    const row = UUID_RE.test(req.params.id) ? await loadGiveawayRow(c, req.params.id) : null;
+    if (!row) {
       await notFound(reply);
+      return null;
+    }
+    const denied = await deps.auth.controls(c, `user:${req.session!.pid}`, row.teamId);
+    if (denied) {
+      await send(reply, rejectionToHttp(denied));
       return null;
     }
     const g = await loadGiveaway(c, deps.rt, req.params.id);
     if (!g) {
       await notFound(reply);
-      return null;
-    }
-    const denied = await deps.auth.controls(c, `user:${req.session!.pid}`, g.row.teamId);
-    if (denied) {
-      await send(reply, rejectionToHttp(denied));
       return null;
     }
     return g;
@@ -95,7 +96,10 @@ export function registerGiveawayRoutes(app: FastifyInstance, deps: ApiDeps, pool
     try {
       const g = await withGiveaway(req, reply, c);
       if (!g) return reply;
-      return await giveawayDetail(c, deps.rt, req.params.id, g.state, now());
+      const detail = await giveawayDetail(c, deps.rt, req.params.id, g.state, now());
+      // Gewinnernamen sind Teilnehmerdaten: Lesezugriff ins Zugriffslog (NEW_DESIGN.md 5.5). Kanalnamen sind Streamer, kein Eintrag.
+      if (detail.winners.length > 0) await logRead(c, { actor: `user:${req.session!.pid}`, action: 'view_detail', target: giveawayStream(req.params.id), ip: req.ip, at: now() });
+      return detail;
     } finally {
       c.release();
     }

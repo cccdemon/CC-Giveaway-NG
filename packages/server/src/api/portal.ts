@@ -83,6 +83,8 @@ export function registerPortalRoutes(app: FastifyInstance, deps: ApiDeps, pool: 
     try {
       const g = await load(req, reply, c);
       if (!g) return reply;
+      // Ein Entwurf ist nicht geöffnet und gehört dem Team: nach außen gibt es ihn noch nicht.
+      if (g.state.status === 'draft') return notFound(reply);
       return await publicView(c, deps, req.params.id, g.state);
     } finally {
       c.release();
@@ -153,8 +155,12 @@ export function registerPortalRoutes(app: FastifyInstance, deps: ApiDeps, pool: 
     try {
       const g = await load(req, reply, c);
       if (!g) return reply;
-      if (!deps.gates) return send(reply, rejectionToHttp(reject('no_checker', 'Bedingungen lassen sich in diesem Prozess nicht prüfen.')));
       const { state } = g;
+      // Dieselbe Sicht wie das Detail (Festlegung 6) und nur bis zur Ziehung: sonst wäre die Route ein Hebel auf das Streamer-Token.
+      const involved = (await c.query('SELECT 1 FROM giveaway_participants WHERE giveaway_id = $1 AND pid = $2', [req.params.id, pid])).rowCount ?? 0;
+      const beforeDraw = state.status === 'open' || state.status === 'paused' || state.status === 'closed';
+      if (!beforeDraw || (involved === 0 && state.status !== 'open')) return notFound(reply);
+      if (!deps.gates) return send(reply, rejectionToHttp(reject('no_checker', 'Bedingungen lassen sich in diesem Prozess nicht prüfen.')));
       try {
         const results = await deps.gates.check(c, {
           channels: state.settings.channels,
