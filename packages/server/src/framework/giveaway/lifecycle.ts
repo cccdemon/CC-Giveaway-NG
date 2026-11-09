@@ -282,16 +282,14 @@ export function giveawayRevertHandler(
   return {
     ...base,
     decide(state, cmd, ctx, prepared) {
-      // Kern-Einträge nur bis Geschlossen: sonst veränderte eine Umkehrung den Topf einer Ersatzziehung (Teilprojekt 6, Festlegung 8).
-      if (prepared.target && state.exists && !KERNEL_REVERT_OPEN.includes(state.status)) {
-        const kernel = d.kernels.get(state.kernelId);
-        if (kernel.events.some((e) => e.type === prepared.target!.type)) {
-          return reject('kernel_locked', 'Nach der Ziehung änderst du keine Kern-Einträge mehr.');
-        }
-      }
       const out = base.decide(state, cmd, ctx, prepared);
-      const gate = prepared.target ? REVERT_GATES[prepared.target.type] : undefined;
-      if (!isRejection(out) && gate && !gate.allowed.includes(state.status)) return gate.rejection();
+      if (isRejection(out) || !prepared.target) return out;
+      const gate = REVERT_GATES[prepared.target.type];
+      if (gate && !gate.allowed.includes(state.status)) return gate.rejection();
+      // Kern-Einträge nur bis Geschlossen: sonst veränderte eine Umkehrung den Topf einer Ersatzziehung (Teilprojekt 6, Festlegung 8).
+      if (!KERNEL_REVERT_OPEN.includes(state.status) && d.kernels.get(state.kernelId).events.some((e) => e.type === prepared.target!.type)) {
+        return reject('kernel_locked', 'Nach Ziehung oder Abbruch änderst du keine Kern-Einträge mehr.');
+      }
       return out;
     },
   };

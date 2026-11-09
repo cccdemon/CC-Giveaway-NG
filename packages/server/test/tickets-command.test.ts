@@ -122,11 +122,23 @@ describe('Ticketkauf über den Bus', () => {
       { pid: P2, weight: 0, in_pool: false },
       { pid: P3, weight: 0, in_pool: false },
     ]);
-    // Nach dem Abbruch sind Kern-Einträge gesperrt, auch wenn die Tickets schon erstattet sind.
-    expect(await run(rt, rt.handlers.revert, { stream: STREAM, eventId: b3!.id, reason: 'x' })).toEqual({
-      ok: false,
-      rejection: { rejected: true, code: 'kernel_locked', message: 'Nach der Ziehung änderst du keine Kern-Einträge mehr.' },
-    });
+    // Der Kauf ist durch die Erstattung schon aufgehoben: das meldet der Bus vor der Sperre des Zustands.
+    expect(await code(run(rt, rt.handlers.revert, { stream: STREAM, eventId: b3!.id, reason: 'x' }))).toBe('already_reverted');
+  });
+
+  it('after a cancel, an open kernel entry of the instant kernel is kernel_locked with a text that names the cancel', async () => {
+    const other = await setupGiveaway();
+    try {
+      await createOpen(other.rt);
+      const [opened] = await must(other.rt, other.rt.handlers.kernelCommand, { giveawayId: GID, command: { type: 'open_window', args: {} } });
+      await must(other.rt, other.rt.handlers.cancel, { giveawayId: GID });
+      expect(await run(other.rt, other.rt.handlers.revert, { stream: STREAM, eventId: opened!.id, reason: 'x' })).toEqual({
+        ok: false,
+        rejection: { rejected: true, code: 'kernel_locked', message: 'Nach Ziehung oder Abbruch änderst du keine Kern-Einträge mehr.' },
+      });
+    } finally {
+      await other.close();
+    }
   });
 
   it('revert of the cancel reopens without tickets; the old purchase stays reverted; a new cancel refunds only new purchases', async () => {
@@ -170,8 +182,10 @@ describe('Ticketkauf über den Bus', () => {
     await must(rt, rt.handlers.draw, { giveawayId: GID });
     expect(await run(rt, rt.handlers.revert, { stream: STREAM, eventId: second!.id, reason: 'x' })).toEqual({
       ok: false,
-      rejection: { rejected: true, code: 'kernel_locked', message: 'Nach der Ziehung änderst du keine Kern-Einträge mehr.' },
+      rejection: { rejected: true, code: 'kernel_locked', message: 'Nach Ziehung oder Abbruch änderst du keine Kern-Einträge mehr.' },
     });
+    // Ein fehlender Grund wird vor der Sperre gemeldet.
+    expect(await code(run(rt, rt.handlers.revert, { stream: STREAM, eventId: second!.id, reason: ' ' }))).toBe('reason_required');
     expect((await kernel(rt)).tickets).toEqual({ [P2]: 1 });
   });
 
