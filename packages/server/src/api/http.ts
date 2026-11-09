@@ -6,7 +6,7 @@ export interface HttpError {
   body: { code: string; message: string };
 }
 
-const FORBIDDEN = new Set(['not_you', 'no_accounts', 'not_your_team']);
+const FORBIDDEN = new Set(['not_you', 'no_accounts', 'not_your_team', 'not_member', 'members_reserved']);
 const NOT_FOUND = new Set(['no_account']);
 
 export function rejectionToHttp(r: Rejection): HttpError {

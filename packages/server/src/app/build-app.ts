@@ -2,6 +2,7 @@ import Fastify, { type FastifyInstance, type FastifyServerOptions } from 'fastif
 import type pg from 'pg';
 import { registerAuthRoutes, type ApiDeps } from '../api/auth.js';
 import { registerMeRoutes } from '../api/me.js';
+import { registerTeamRoutes } from '../api/teams.js';
 
 export type { ApiDeps } from '../api/auth.js';
 
@@ -28,6 +29,7 @@ export function buildApp(deps: AppDeps, opts: { logger?: FastifyServerOptions['l
   if (deps.api) {
     registerAuthRoutes(app, deps.api, deps.pool);
     registerMeRoutes(app, deps.api, deps.pool);
+    registerTeamRoutes(app, deps.api, deps.pool);
   }
   return app;
 }

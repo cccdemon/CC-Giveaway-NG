@@ -5,7 +5,7 @@ import { vi } from 'vitest';
 import { buildApp } from '../../src/app/build-app.js';
 import { allowAll } from '../../src/framework/giveaway/authorize.js';
 import { InMemoryPublisher } from '../../src/framework/publisher.js';
-import { createRuntime, type Runtime } from '../../src/framework/runtime.js';
+import { createRuntime, type Runtime, type RuntimeOptions } from '../../src/framework/runtime.js';
 import type { TwitchUser } from '../../src/identity/identities.js';
 import { attachAccounts, type AccountHandlers } from '../../src/identity/runtime.js';
 import { REQUIRED_CHANNEL_SCOPES, TwitchError, type TwitchAuthClient } from '../../src/identity/twitch.js';
@@ -58,9 +58,9 @@ export interface ApiSetup {
   close(): Promise<void>;
 }
 
-export async function setupApi(): Promise<ApiSetup> {
+export async function setupApi(over: Partial<Omit<RuntimeOptions, 'pool' | 'publisher' | 'log'>> = {}): Promise<ApiSetup> {
   const db = await freshDb();
-  const rt = createRuntime({ pool: db.pool, publisher: new InMemoryPublisher(), auth: allowAll, log: { error: vi.fn() }, legalSource: fullLegalSource, fetcher: fakeFetcher });
+  const rt = createRuntime({ pool: db.pool, publisher: new InMemoryPublisher(), auth: allowAll, log: { error: vi.fn() }, legalSource: fullLegalSource, fetcher: fakeFetcher, ...over });
   const accounts = attachAccounts(rt, { tokenKey: KEY });
   const twitch = stubTwitch();
   const clock = { now: AT };
