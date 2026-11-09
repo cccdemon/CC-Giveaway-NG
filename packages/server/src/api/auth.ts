@@ -2,6 +2,7 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type pg from 'pg';
+import type { GiveawayAuthorizer } from '../framework/giveaway/authorize.js';
 import type { Runtime } from '../framework/runtime.js';
 import { findPidByTwitchId } from '../identity/identities.js';
 import type { AccountHandlers } from '../identity/runtime.js';
@@ -14,6 +15,8 @@ import { sessionOf } from './session.js';
 export interface ApiDeps {
   rt: Runtime;
   accounts: AccountHandlers;
+  /** Rechte für Lese-Routen der Streamer-App (dieselbe Prüfung wie die Giveaway-Befehle). */
+  auth: GiveawayAuthorizer;
   twitch: TwitchAuthClient;
   /** Öffentliche Basis-URL ohne Schrägstrich am Ende. */
   publicUrl: string;

@@ -81,6 +81,14 @@ export async function createIdentities(c: pg.PoolClient, users: TwitchUser[], no
   return findPidsByTwitchIds(c, unique.map((u) => u.id));
 }
 
+/** Anzeigenamen je pid in einer Abfrage. Fehlende pids fehlen in der Antwort (gelöscht oder unbekannt). */
+export async function displayNamesOf(db: Queryable, pids: string[]): Promise<Map<string, string>> {
+  const unique = [...new Set(pids)];
+  if (unique.length === 0) return new Map();
+  const r = await db.query<{ pid: string; display_name: string }>('SELECT pid, display_name FROM identities WHERE pid = ANY($1::uuid[])', [unique]);
+  return new Map(r.rows.map((row) => [row.pid, row.display_name]));
+}
+
 export async function findTwitchIdsByPids(db: Queryable, pids: string[]): Promise<Map<string, string>> {
   if (pids.length === 0) return new Map();
   const r = await db.query<{ pid: string; twitch_id: string }>('SELECT pid, twitch_id FROM identities WHERE pid = ANY($1::uuid[])', [pids]);

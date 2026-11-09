@@ -45,7 +45,7 @@ async function main() {
   });
   const accounts = attachAccounts(rt, { tokenKey });
   const app = buildApp(
-    { pool, api: { rt, accounts, twitch, publicUrl: config.publicUrl, secureCookies: config.nodeEnv === 'production' } },
+    { pool, api: { rt, accounts, auth: accountAuthorizer(), twitch, publicUrl: config.publicUrl, secureCookies: config.nodeEnv === 'production' } },
     { logger: { level: config.logLevel } },
   );
   app.addHook('onClose', async () => {

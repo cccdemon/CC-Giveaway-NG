@@ -88,6 +88,25 @@ export async function readStream(db: Queryable, registry: EventTypeRegistry, str
   return r.rows.map((row) => registry.upcast(rowToRecord(row)));
 }
 
+export const PAGE_LIMIT_MAX = 200;
+export const PAGE_LIMIT_DEFAULT = 50;
+
+/** Eine Seite eines Stroms, neueste zuerst. beforeSeq ist exklusiv, limit wird auf 1 bis 200 begrenzt (Verlauf, NEW_DESIGN.md 5.3). */
+export async function readStreamPage(
+  db: Queryable,
+  registry: EventTypeRegistry,
+  stream: StreamId,
+  o: { beforeSeq?: number; limit?: number },
+): Promise<EventRecord[]> {
+  const limit = Math.min(PAGE_LIMIT_MAX, Math.max(1, Math.trunc(o.limit ?? PAGE_LIMIT_DEFAULT)));
+  const before = o.beforeSeq === undefined ? null : Math.trunc(o.beforeSeq);
+  const r = await db.query<EventRow>(
+    `SELECT ${COLUMNS} FROM events WHERE stream = $1 AND ($2::int IS NULL OR seq < $2) ORDER BY seq DESC LIMIT $3`,
+    [stream, before, limit],
+  );
+  return r.rows.map((row) => registry.upcast(rowToRecord(row)));
+}
+
 const BIGINT_MAX = 9_223_372_036_854_775_807n;
 
 /** Eine Ereignis-ID muss als BIGINT lesbar sein, sonst wirft Postgres 22003 statt „nicht gefunden“ zu liefern. */

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { afterEach, describe, expect, it } from 'vitest';
 import { withTx } from '../src/db/pool.js';
-import { appendLocked, isReverted, lockStream, readEvent, readStream } from '../src/journal/journal.js';
+import { appendLocked, isReverted, lockStream, readEvent, readStream, readStreamPage } from '../src/journal/journal.js';
 import { ensurePartitions, isMissingPartition, partitionName } from '../src/journal/partitions.js';
 import { AT, freshDb } from './helpers/db.js';
 import { ACTOR, STREAM, testRegistry } from './helpers/fixtures.js';
@@ -128,6 +128,20 @@ describe('append and read', () => {
     })).rejects.toMatchObject({ code: 'seq_conflict' });
     const seqs = (await readStream(pool, registry, STREAM)).map((e) => e.seq);
     expect(seqs).toEqual([1]);
+  });
+
+  it('readStreamPage returns newest first, respects beforeSeq and clamps limit to 1..200', async () => {
+    const pool = await setup();
+    await withTx(pool, async (c) => appendLocked(c, registry, {
+      stream: STREAM, lastSeq: await lockStream(c, STREAM), actor: ACTOR, correlationId: randomUUID(), at: AT,
+      events: [1, 2, 3, 4, 5].map((by) => ({ type: 'counter_incremented', payload: { by } })),
+    }));
+    expect((await readStreamPage(pool, registry, STREAM, { limit: 2 })).map((e) => e.seq)).toEqual([5, 4]);
+    expect((await readStreamPage(pool, registry, STREAM, { limit: 2, beforeSeq: 4 })).map((e) => e.seq)).toEqual([3, 2]);
+    expect((await readStreamPage(pool, registry, STREAM, { limit: 0 })).map((e) => e.seq)).toEqual([5]);
+    expect((await readStreamPage(pool, registry, STREAM, { limit: 500 })).map((e) => e.seq)).toEqual([5, 4, 3, 2, 1]);
+    expect((await readStreamPage(pool, registry, STREAM, {})).map((e) => e.seq)).toEqual([5, 4, 3, 2, 1]);
+    expect(await readStreamPage(pool, registry, STREAM, { beforeSeq: 1 })).toEqual([]);
   });
 
   it('refuses TRUNCATE, UPDATE and DELETE directly on a partition', async () => {

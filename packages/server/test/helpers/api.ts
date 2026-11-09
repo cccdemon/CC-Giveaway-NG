@@ -64,7 +64,10 @@ export async function setupApi(over: Partial<Omit<RuntimeOptions, 'pool' | 'publ
   const accounts = attachAccounts(rt, { tokenKey: KEY });
   const twitch = stubTwitch();
   const clock = { now: AT };
-  const app = buildApp({ pool: db.pool, api: { rt, accounts, twitch: twitch.client, publicUrl: PUBLIC_URL, secureCookies: true, now: () => clock.now } });
+  const app = buildApp({
+    pool: db.pool,
+    api: { rt, accounts, auth: over.auth ?? allowAll, twitch: twitch.client, publicUrl: PUBLIC_URL, secureCookies: true, now: () => clock.now },
+  });
   return {
     pool: db.pool, app, rt, accounts, twitch, clock,
     close: async () => {
