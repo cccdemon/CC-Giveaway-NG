@@ -10,7 +10,7 @@ import { minuteOf } from '../src/ingest/bundler.js';
 import type { SignalUser } from '../src/ingest/signals.js';
 import { AT } from './helpers/db.js';
 import { ctx } from './helpers/fixtures.js';
-import { GID, GID2, GID3, GID4, P1, P2, P3, createOpen, must, run, setupGiveaway, state, userOf } from './helpers/giveaway.js';
+import { GID, GID2, GID3, GID4, P1, P2, P3, TEAM, createOpen, must, run, setupGiveaway, state, userOf } from './helpers/giveaway.js';
 
 let close: (() => Promise<void>) | undefined;
 afterEach(async () => {
@@ -55,6 +55,20 @@ describe('purge_unregistered', () => {
     expect(await findIdentity(s.pool, P3)).not.toBeNull();
     expect((await state(s.rt)).purgedAt).toBe(day(7).toISOString());
     expect((await s.pool.query('SELECT purged_at FROM giveaways WHERE id = $1', [GID])).rows[0]).toEqual({ purged_at: day(7) });
+  });
+
+  it('keeps a pid that is banned in the team: the ban must outlive the purge', async () => {
+    const s = await setup();
+    await must(s.rt, s.rt.teams.create, { teamId: TEAM, name: 'Werwölfe' });
+    await createOpen(s.rt, firstSeen(GID));
+    await must(s.rt, s.rt.handlers.applySignals, presence(GID, [ALICE, GHOST]), INGEST);
+    const pg = (await findPidByTwitchId(s.pool, GHOST.id))!;
+    await must(s.rt, s.rt.teams.ban, { teamId: TEAM, pid: P2 });
+    await must(s.rt, s.rt.handlers.close, purge());
+    const events = await must(s.rt, s.rt.handlers.purgeUnregistered, purge(), { ...SCHEDULER, now: day(7) });
+    expect(events[0]!.payload).toEqual({ pids: [pg] });
+    expect(await findIdentity(s.pool, P2)).not.toBeNull();
+    expect(await findIdentity(s.pool, pg)).toBeNull();
   });
 
   it('keeps a pid with an account and a pid seen in another running giveaway', async () => {

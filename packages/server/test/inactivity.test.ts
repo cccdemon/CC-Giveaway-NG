@@ -40,4 +40,20 @@ describe('purgeInactiveAccounts', () => {
 
     expect(await purgeInactiveAccounts(s.pool, s.rt, accounts, day(INACTIVE_DAYS + 1))).toEqual({ deleted: [], failed: 0 });
   });
+
+  it('keeps an identity that is banned in a team, even when unseen for 365 days', async () => {
+    const s = await setupGiveaway();
+    close = s.close;
+    const accounts = attachAccounts(s.rt, { tokenKey: randomBytes(32) });
+    const signIn = (pid: string, id: string) =>
+      s.rt.bus.execute(accounts.signIn, { pid, soloTeamId: pid, user: { id, login: `u${id}`, displayName: `U${id}` } }, ctx({ actor: 'system:twitch', now: AT }));
+    expect((await signIn(OLD, '1')).ok).toBe(true);
+    expect((await signIn(FRESH, '2')).ok).toBe(true);
+    const TEAM = '55555555-5555-4555-8555-555555555555';
+    expect((await s.rt.bus.execute(s.rt.teams.create, { teamId: TEAM, name: 'Werwölfe' }, ctx({ actor: `user:${FRESH}` }))).ok).toBe(true);
+    expect((await s.rt.bus.execute(s.rt.teams.ban, { teamId: TEAM, pid: OLD }, ctx({ actor: `user:${FRESH}` }))).ok).toBe(true);
+    const r = await purgeInactiveAccounts(s.pool, s.rt, accounts, day(INACTIVE_DAYS + 1));
+    expect(r).toEqual({ deleted: [FRESH], failed: 0 });
+    expect(await findIdentity(s.pool, OLD)).not.toBeNull();
+  });
 });

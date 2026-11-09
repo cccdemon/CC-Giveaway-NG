@@ -19,7 +19,8 @@ const DAY_MS = 86_400_000;
 
 /**
  * Löschbar ist nur, wer kein Konto hat, nirgends angemeldet oder Gewinner ist (auch nicht in abgeschlossenen Giveaways,
- * Spec 7.3: der Gewinn muss meldbar bleiben) und in keinem anderen laufenden Giveaway gesehen wurde.
+ * Spec 7.3: der Gewinn muss meldbar bleiben), in keinem anderen laufenden Giveaway gesehen wurde und in keinem Team
+ * gesperrt ist (15.3: die Sperre braucht die Zuordnung, sonst käme die Person mit neuer pid zurück).
  */
 async function deletable(c: pg.PoolClient, giveawayId: string, candidates: Pid[]): Promise<Pid[]> {
   if (candidates.length === 0) return [];
@@ -31,6 +32,7 @@ async function deletable(c: pg.PoolClient, giveawayId: string, candidates: Pid[]
          SELECT 1 FROM giveaway_participants gp JOIN giveaways g ON g.id = gp.giveaway_id
          WHERE gp.pid = p.pid AND g.id <> $2 AND g.status = ANY($3)
        )
+       AND NOT EXISTS (SELECT 1 FROM team_bans b WHERE b.pid = p.pid)
      ORDER BY p.pid`,
     [candidates, giveawayId, [...RUNNING]],
   );
