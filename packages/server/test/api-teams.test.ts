@@ -70,7 +70,9 @@ describe('/teams', () => {
     const bob = await complete(api, BOB);
     expect((await api.app.inject({ method: 'POST', url: `/teams/join/${inviteId}`, headers: { cookie: bob.cookie } })).statusCode).toBe(204);
     const team = (await api.app.inject({ method: 'GET', url: `/teams/${teamId}`, headers: { cookie: bob.cookie } })).json();
-    expect(team.members).toEqual([
+    // Beide traten zur selben Testzeit bei, die Reihenfolge hängt dann an den zufälligen pids.
+    const byName = (list: { displayName: string }[]) => [...list].sort((a, b) => a.displayName.localeCompare(b.displayName));
+    expect(byName(team.members)).toEqual([
       { pid: alice.pid, displayName: 'Alice' },
       { pid: bob.pid, displayName: 'Bob' },
     ]);
