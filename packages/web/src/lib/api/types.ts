@@ -258,7 +258,7 @@ export interface PublicGiveaway {
   id: string;
   prize: string;
   sponsor: string | null;
-  kernel: { id: string; label: string; display: DisplaySpec };
+  kernel: { id: string; label: string; display: DisplaySpec; commands: KernelCommandSpec[] };
   status: GiveawayStatus;
   channels: { pid: string; displayName: string }[];
   keyword: string | null;

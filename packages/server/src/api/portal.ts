@@ -21,7 +21,7 @@ interface PublicGiveaway {
   id: string;
   prize: string;
   sponsor: string | null;
-  kernel: { id: string; label: string; display: ReturnType<typeof kernelInfo>['display'] };
+  kernel: { id: string; label: string; display: ReturnType<typeof kernelInfo>['display']; commands: ReturnType<typeof kernelInfo>['commands'] };
   status: GiveawayState['status'];
   channels: { pid: Pid; displayName: string }[];
   keyword: string | null;
@@ -53,7 +53,7 @@ async function publicView(c: pg.PoolClient, deps: ApiDeps, id: string, state: Gi
     id,
     prize: state.settings.prize,
     sponsor: state.settings.sponsor,
-    kernel: { id: k.id, label: k.label, display: k.display },
+    kernel: { id: k.id, label: k.label, display: k.display, commands: k.commands },
     status: state.status,
     channels: state.settings.channels.map((pid) => ({ pid, displayName: names.get(pid) ?? displayNameOf(null, pid) })),
     keyword: state.settings.keyword,

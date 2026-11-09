@@ -84,7 +84,7 @@ describe('Portal-API', () => {
       id: GID_A,
       prize: 'Key',
       sponsor: null,
-      kernel: { id: 'instant', label: 'Sofortverlosung', display: expect.objectContaining({ icon: '⚡' }) },
+      kernel: { id: 'instant', label: 'Sofortverlosung', display: expect.objectContaining({ icon: '⚡' }), commands: [{ type: 'open_window', label: 'Anmeldefenster öffnen', issuer: 'streamer' }, { type: 'close_window', label: 'Anmeldefenster schließen', issuer: 'scheduler' }] },
       status: 'open',
       channels: [{ pid: alice.pid, displayName: 'Alice' }],
       keyword: '!key',
