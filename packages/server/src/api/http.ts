@@ -6,7 +6,7 @@ export interface HttpError {
   body: { code: string; message: string };
 }
 
-const FORBIDDEN = new Set(['not_you', 'no_accounts', 'not_your_team', 'not_member', 'members_reserved']);
+const FORBIDDEN = new Set(['not_you', 'no_accounts', 'not_your_team', 'not_member', 'members_reserved', 'account_banned', 'not_admin']);
 const NOT_FOUND = new Set(['no_account']);
 /** Twitch antwortet nicht oder das Token ist ungültig: kein Fehler der Anfrage, sondern der Gegenseite (NEW_DESIGN.md 12.1). */
 const UPSTREAM = new Set(['twitch_unreachable', 'token_invalid']);

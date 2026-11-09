@@ -12,7 +12,7 @@ export interface ChannelSource {
 
 export const DIRECTORY_INTERVAL_MS = 30_000;
 
-/** Verbundene Kanäle mit gültigem Token. full = in mindestens einem offenen Giveaway (Pausiert sammelt nichts, 7.1). */
+/** Verbundene Kanäle mit gültigem Token, ohne gesperrte Streamer (11.4). full = in mindestens einem offenen Giveaway (Pausiert sammelt nichts, 7.1). */
 export function pgChannelSource(pool: pg.Pool): ChannelSource {
   return {
     async list() {
@@ -23,6 +23,7 @@ export function pgChannelSource(pool: pg.Pool): ChannelSource {
            JOIN identities i ON i.pid = a.pid
            JOIN channel_tokens t ON t.pid = a.pid
           WHERE a.channel_connected AND NOT a.deleted AND t.status = 'ok'
+            AND NOT EXISTS (SELECT 1 FROM platform_bans b WHERE b.pid = a.pid)
           ORDER BY a.pid`,
       );
       return r.rows.map((x) => ({ pid: x.pid, twitchId: x.twitch_id, watch: x.full ? 'full' : 'state' }));

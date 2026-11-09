@@ -7,7 +7,7 @@ import type { EventTypeRegistry } from '../../journal/event-types.js';
 import { canonicalJson } from '../../shared/canonical.js';
 import { isRejection, reject, type Rejection } from '../../shared/rejection.js';
 import { findIdentity, upsertIdentity, type TwitchUser } from '../identities.js';
-import { PLATFORM_TERMS_VERSION } from '../terms.js';
+import { currentTerms, type CurrentTerms } from '../../platform/terms.js';
 import { saveChannelToken } from '../tokens.js';
 import { REQUIRED_CHANNEL_SCOPES } from '../twitch.js';
 import { ACCOUNT_EVENTS, accountReducer, accountStream, pidOfStream, type AccountState } from './state.js';
@@ -71,16 +71,18 @@ export function signInHandler(): Handler<SignInCmd, { pid: string }> {
   };
 }
 
-export function acceptTermsHandler(): Handler<AcceptTermsCmd> {
+export function acceptTermsHandler(): Handler<AcceptTermsCmd, CurrentTerms> {
   return {
     type: 'accept_terms',
     streamOf: (cmd) => accountStream(cmd.pid),
     reducer: accountReducer,
     authorize: self,
-    decide(state, cmd) {
+    // Die gültige Fassung steht im Strom platform (Lesetabelle platform_terms), nicht im Code.
+    prepare: (c) => currentTerms(c),
+    decide(state, cmd, _ctx, terms) {
       const missing = requireAccount(state);
       if (missing) return missing;
-      if (cmd.version !== PLATFORM_TERMS_VERSION) {
+      if (cmd.version !== terms.version) {
         return reject('terms_version_stale', 'Die Nutzungsbedingungen haben sich geändert. Lade die Seite neu.');
       }
       if (state.termsVersion === cmd.version) return [];

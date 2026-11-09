@@ -3,11 +3,13 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { CommandResult } from '../src/framework/command-bus.js';
 import { accountAuthorizer, accountTeamAuthorizer } from '../src/identity/account/authorizer.js';
 import { attachAccounts } from '../src/identity/runtime.js';
-import { PLATFORM_TERMS_VERSION } from '../src/identity/terms.js';
+import { allAdmins } from '../src/platform/admin.js';
+import { attachPlatform } from '../src/platform/runtime.js';
+import { TERMS_FALLBACK_VERSION as PLATFORM_TERMS_VERSION } from '../src/platform/terms.js';
 import { REQUIRED_CHANNEL_SCOPES } from '../src/identity/twitch.js';
 import type { Runtime } from '../src/framework/runtime.js';
 import { ctx } from './helpers/fixtures.js';
-import { GID, P1, setupGiveaway } from './helpers/giveaway.js';
+import { GID, GID2, P1, setupGiveaway } from './helpers/giveaway.js';
 
 let close: (() => Promise<void>) | undefined;
 afterEach(async () => {
@@ -144,5 +146,48 @@ describe('accountAuthorizer', () => {
     await must(create(rt, me));
     await must(rt.bus.execute(accounts.deleteAccount, { pid: PID }, ctx({ actor: me })));
     expect(codeOf(await rt.bus.execute(rt.handlers.open, { giveawayId: GID }, ctx({ actor: me })))).toBe('no_account');
+  });
+});
+
+describe('Plattform-Sperre und Fassungen der Nutzungsbedingungen (Teilprojekt 8c)', () => {
+  const ADMIN = 'user:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  const BANNED_TEXT = 'Dein Konto ist gesperrt. Grund: Bot-Verhalten. Wende dich an den Betreiber.';
+
+  async function completeAccount(rt: Runtime, accounts: ReturnType<typeof attachAccounts>, me: string, version = 1) {
+    await must(rt.bus.execute(accounts.signIn, { pid: PID, soloTeamId: SOLO, user: ALICE }, ctx({ actor: 'system:twitch' })));
+    await must(rt.bus.execute(accounts.acceptTerms, { pid: PID, version }, ctx({ actor: me })));
+    await must(rt.bus.execute(accounts.connectChannel, { pid: PID, twitchId: ALICE.id, token }, ctx({ actor: me })));
+  }
+
+  it('a banned streamer gets account_banned with the reason on controls and canFound; after unban both pass again', async () => {
+    const { rt, accounts, pool } = await setup();
+    const platform = attachPlatform(rt, { admins: allAdmins });
+    const me = `user:${PID}`;
+    await completeAccount(rt, accounts, me);
+    expect(codeOf(await create(rt, me))).toBe('ok');
+    await must(rt.bus.execute(platform.ban, { pid: PID, reason: 'Bot-Verhalten' }, ctx({ actor: ADMIN })));
+    expect(await create(rt, me, SOLO, GID2)).toMatchObject({ ok: false, rejection: { code: 'account_banned', message: BANNED_TEXT } });
+    expect(codeOf(await rt.bus.execute(rt.handlers.open, { giveawayId: GID }, ctx({ actor: me })))).toBe('account_banned');
+    const c = await pool.connect();
+    try {
+      expect(await accountTeamAuthorizer().canFound(c, me)).toMatchObject({ code: 'account_banned' });
+    } finally {
+      c.release();
+    }
+    await must(rt.bus.execute(platform.unban, { pid: PID, reason: 'Geklärt' }, ctx({ actor: ADMIN })));
+    expect(codeOf(await create(rt, me, SOLO, GID2))).toBe('ok');
+  });
+
+  it('after publish_terms the streamer needs the new version: controls → terms_required, accept_terms with the old version → terms_version_stale, with the new one → ok', async () => {
+    const { rt, accounts } = await setup();
+    const platform = attachPlatform(rt, { admins: allAdmins });
+    const me = `user:${PID}`;
+    await completeAccount(rt, accounts, me);
+    expect(codeOf(await create(rt, me))).toBe('ok');
+    await must(rt.bus.execute(platform.publishTerms, { text: 'Fassung zwei.' }, ctx({ actor: ADMIN })));
+    expect(codeOf(await create(rt, me, SOLO, GID2))).toBe('terms_required');
+    expect(codeOf(await rt.bus.execute(accounts.acceptTerms, { pid: PID, version: 1 }, ctx({ actor: me })))).toBe('terms_version_stale');
+    expect(codeOf(await rt.bus.execute(accounts.acceptTerms, { pid: PID, version: 2 }, ctx({ actor: me })))).toBe('ok');
+    expect(codeOf(await create(rt, me, SOLO, GID2))).toBe('ok');
   });
 });

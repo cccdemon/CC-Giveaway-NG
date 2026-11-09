@@ -2,6 +2,7 @@
 import type { CommandHandler } from '../framework/command-bus.js';
 import type { RevertCommand, RevertPrepared } from '../framework/revert.js';
 import type { Runtime } from '../framework/runtime.js';
+import type { CurrentTerms } from '../platform/terms.js';
 import {
   acceptTermsHandler,
   accountRevertHandler,
@@ -25,7 +26,7 @@ type Handler<C, P = undefined> = CommandHandler<C, AccountState, P>;
 
 export interface AccountHandlers {
   signIn: Handler<SignInCmd, { pid: string }>;
-  acceptTerms: Handler<AcceptTermsCmd>;
+  acceptTerms: Handler<AcceptTermsCmd, CurrentTerms>;
   updateProfile: Handler<UpdateProfileCmd>;
   connectChannel: Handler<ConnectChannelCmd, { mismatch: boolean }>;
   disconnectChannel: Handler<AccountCmd>;

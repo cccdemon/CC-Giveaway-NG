@@ -4,6 +4,8 @@ import { attachAccounts } from '../src/identity/runtime.js';
 import { markTokenInvalid } from '../src/identity/tokens.js';
 import { REQUIRED_CHANNEL_SCOPES } from '../src/identity/twitch.js';
 import { Directory, pgChannelSource, type ChannelSource } from '../src/ingest/directory.js';
+import { allAdmins } from '../src/platform/admin.js';
+import { attachPlatform } from '../src/platform/runtime.js';
 import { shardOf } from '../src/ingest/shard.js';
 import type { ChannelRef, IngestAdapter } from '../src/ingest/signals.js';
 import { AT } from './helpers/db.js';
@@ -91,5 +93,26 @@ describe('Directory', () => {
     expect(d.current()).toHaveLength(1);
     expect(adapter.stop).not.toHaveBeenCalled();
     expect(log.error).toHaveBeenCalled();
+  });
+});
+
+describe('pgChannelSource und Plattform-Sperre (Teilprojekt 8c)', () => {
+  it('channel directory leaves out banned channels and lists them again after unban', async () => {
+    const s = await setupGiveaway();
+    close = s.close;
+    const accounts = attachAccounts(s.rt, { tokenKey: KEY });
+    const platform = attachPlatform(s.rt, { admins: allAdmins });
+    const connect = async (pid: string, twitchId: string, login: string) => {
+      await must(s.rt, accounts.signIn, { pid, soloTeamId: SOLO.replace('5555-4', `${twitchId}-4`), user: { id: twitchId, login, displayName: login } }, { actor: 'system:twitch' });
+      await must(s.rt, accounts.connectChannel, { pid, twitchId, token }, { actor: `user:${pid}` });
+    };
+    await connect(P1, '1001', 'alice');
+    await connect(P2, '1002', 'bob');
+    const source = pgChannelSource(s.pool);
+    expect((await source.list()).map((x) => x.pid)).toEqual([P1, P2]);
+    await must(s.rt, platform.ban, { pid: P1, reason: 'Bot-Verhalten' }, { actor: `user:${P3}` });
+    expect((await source.list()).map((x) => x.pid)).toEqual([P2]);
+    await must(s.rt, platform.unban, { pid: P1, reason: 'Geklärt' }, { actor: `user:${P3}` });
+    expect((await source.list()).map((x) => x.pid)).toEqual([P1, P2]);
   });
 });

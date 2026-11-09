@@ -9,7 +9,7 @@ import { fetchHash, isPrivateAddress } from '../src/framework/legal.js';
 import { attachAccounts } from '../src/identity/runtime.js';
 import { REQUIRED_CHANNEL_SCOPES } from '../src/identity/twitch.js';
 import { loadChannelToken } from '../src/identity/tokens.js';
-import { PLATFORM_TERMS_VERSION } from '../src/identity/terms.js';
+import { TERMS_FALLBACK_VERSION as PLATFORM_TERMS_VERSION } from '../src/platform/terms.js';
 import { GID, P1, STREAMER, TEAM, createOpen, must, run, setupGiveaway, state } from './helpers/giveaway.js';
 
 let close: (() => Promise<void>) | undefined;

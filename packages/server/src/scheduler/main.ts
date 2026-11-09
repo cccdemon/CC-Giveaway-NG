@@ -12,6 +12,8 @@ import { loadTokenKey } from '../identity/crypto.js';
 import { identityResolver } from '../identity/resolver.js';
 import { pgChannelActivity } from '../ingest/channel-status.js';
 import { attachAccounts } from '../identity/runtime.js';
+import { noAdmins } from '../platform/admin.js';
+import { attachPlatform } from '../platform/runtime.js';
 import { createRuntime } from '../framework/runtime.js';
 import { SchedulerLockError, acquireSchedulerLock } from './lock.js';
 import { scheduleLoop } from './loop.js';
@@ -55,6 +57,8 @@ async function main() {
     teamAuth: denyUsersTeams, teamDirectory: pgTeamDirectory(), bans: pgBanDirectory(),
   });
   const accounts = attachAccounts(rt, { tokenKey });
+  // Ereignistypen des Stroms platform müssen in jedem Prozess bekannt sein. Admin-Befehle nimmt nur die App an.
+  attachPlatform(rt, { admins: noAdmins });
 
   const maintenance = async () => {
     try {

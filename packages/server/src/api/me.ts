@@ -8,7 +8,7 @@ import { loadStreamState } from '../framework/state.js';
 import { accountReducer, accountStream, type AccountState } from '../identity/account/state.js';
 import { findIdentity } from '../identity/identities.js';
 import { SESSION_COOKIE } from '../identity/sessions.js';
-import { PLATFORM_TERMS_VERSION } from '../identity/terms.js';
+import { currentTerms } from '../platform/terms.js';
 import { channelStatusView } from '../ingest/status-view.js';
 import { readStream } from '../journal/journal.js';
 import type { ApiDeps } from './auth.js';
@@ -47,15 +47,24 @@ export function registerMeRoutes(app: FastifyInstance, deps: ApiDeps, pool: pg.P
       const identity = await findIdentity(c, pid);
       const state = await loadStreamState(c, deps.rt.registry, accountStream(pid), accountReducer);
       if (!identity || !state.exists || state.deleted) return reply.code(NO_SESSION.status).send(NO_SESSION.body);
+      const [terms, admin, ban, warnings] = await Promise.all([
+        currentTerms(c),
+        deps.admins.isAdmin(c, pid),
+        c.query<{ reason: string; since: Date }>('SELECT reason, since FROM platform_bans WHERE pid = $1', [pid]),
+        c.query<{ event_id: string; reason: string; at: Date }>('SELECT event_id, reason, at FROM platform_warnings WHERE pid = $1 AND NOT withdrawn ORDER BY at', [pid]),
+      ]);
       return {
         pid,
         login: identity.login,
         displayName: identity.displayName,
         soloTeamId: state.soloTeamId,
         termsVersion: state.termsVersion,
-        currentTermsVersion: PLATFORM_TERMS_VERSION,
+        currentTermsVersion: terms.version,
         channelConnected: state.channelConnected,
         legal: state.legal,
+        admin,
+        banned: ban.rows[0] ? { reason: ban.rows[0].reason, since: ban.rows[0].since.toISOString() } : null,
+        warnings: warnings.rows.map((w) => ({ eventId: w.event_id, reason: w.reason, at: w.at.toISOString() })),
       };
     } finally {
       c.release();

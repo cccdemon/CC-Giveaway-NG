@@ -7,6 +7,8 @@ import type { BusLogger } from '../framework/command-bus.js';
 import { denyUsers } from '../framework/giveaway/authorize.js';
 import { RedisPublisher } from '../framework/publisher.js';
 import { createRuntime } from '../framework/runtime.js';
+import { noAdmins } from '../platform/admin.js';
+import { attachPlatform } from '../platform/runtime.js';
 import { denyUsersTeams } from '../framework/team/commands.js';
 import { accountLegalSource } from '../identity/account/legal-source.js';
 import { pgBanDirectory, pgTeamDirectory } from '../identity/team-directory.js';
@@ -38,6 +40,7 @@ async function main() {
     pool, publisher: new RedisPublisher(redis), auth: denyUsers, legalSource: accountLegalSource(), identities: identityResolver(), activity: pgChannelActivity(), log,
     teamAuth: denyUsersTeams, teamDirectory: pgTeamDirectory(), bans: pgBanDirectory(),
   });
+  attachPlatform(rt, { admins: noAdmins });
   const { worker } = buildIngest(config, { pool, rt, tokenKey, log });
   await worker.start();
   console.log(JSON.stringify({ msg: 'Ingest läuft.', adapter: config.ingestAdapter, worker: config.ingestWorkerIndex, workers: config.ingestWorkers }));

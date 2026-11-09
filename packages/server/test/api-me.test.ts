@@ -3,7 +3,8 @@ import { ACCOUNT_EVENTS, accountStream } from '../src/identity/account/state.js'
 import { findIdentity } from '../src/identity/identities.js';
 import { loadChannelToken } from '../src/identity/tokens.js';
 import { upsertChannelStatus } from '../src/ingest/channel-status.js';
-import { ALICE, KEY, connect, login, setupApi, type ApiSetup } from './helpers/api.js';
+import { twitchIdAdmins } from '../src/platform/admin.js';
+import { ALICE, BOB, KEY, connect, login, setupApi, type ApiSetup } from './helpers/api.js';
 import { GID, P1, TEAM } from './helpers/giveaway.js';
 import { ctx } from './helpers/fixtures.js';
 
@@ -110,5 +111,30 @@ describe('/me', () => {
     await upsertChannelStatus(s.pool, pid, { live: true, viewers: 10, chatters: 8, lastSignalAt: s.clock.now }, s.clock.now);
     r = await s.app.inject({ method: 'GET', url: '/api/me/channel', headers: { cookie } });
     expect(r.json()).toMatchObject({ pid, connected: true, tokenStatus: 'ok', live: true, viewers: 10, chatters: 8, coverage: 0.8, warning: null });
+  });
+});
+
+describe('/me und Plattform (Teilprojekt 8c)', () => {
+  it('GET /me carries admin, banned, warnings and the current terms version from the database', async () => {
+    s = await setupApi({ admins: twitchIdAdmins([ALICE.id]) });
+    const { cookie } = await login(s);
+    const me1 = (await s.app.inject({ method: 'GET', url: '/api/me', headers: { cookie } })).json();
+    expect(me1).toMatchObject({ admin: true, banned: null, warnings: [], currentTermsVersion: 1 });
+    const admin = `user:${me1.pid as string}`;
+    const warned = await s.rt.bus.execute(s.platform.warn, { pid: me1.pid, reason: 'Keyword-Spam' }, ctx({ actor: admin }));
+    if (!warned.ok) throw new Error(warned.rejection.code);
+    const banned = await s.rt.bus.execute(s.platform.ban, { pid: me1.pid, reason: 'Bot-Verhalten' }, ctx({ actor: admin }));
+    if (!banned.ok) throw new Error(banned.rejection.code);
+    const published = await s.rt.bus.execute(s.platform.publishTerms, { text: 'Fassung zwei.' }, ctx({ actor: admin }));
+    if (!published.ok) throw new Error(published.rejection.code);
+    const me2 = (await s.app.inject({ method: 'GET', url: '/api/me', headers: { cookie } })).json();
+    expect(me2).toMatchObject({
+      admin: true,
+      banned: { reason: 'Bot-Verhalten', since: expect.any(String) },
+      warnings: [{ eventId: warned.events[0]!.id, reason: 'Keyword-Spam', at: expect.any(String) }],
+      currentTermsVersion: 2,
+    });
+    const { cookie: bobCookie } = await login(s, BOB);
+    expect((await s.app.inject({ method: 'GET', url: '/api/me', headers: { cookie: bobCookie } })).json().admin).toBe(false);
   });
 });

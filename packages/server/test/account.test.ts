@@ -6,7 +6,7 @@ import { ACCOUNT_EVENTS, accountReducer, accountStream, type AccountState } from
 import { findIdentity, upsertIdentity } from '../src/identity/identities.js';
 import { withTx } from '../src/db/pool.js';
 import { createSession, findSession } from '../src/identity/sessions.js';
-import { PLATFORM_TERMS_VERSION } from '../src/identity/terms.js';
+import { TERMS_FALLBACK_VERSION as PLATFORM_TERMS_VERSION } from '../src/platform/terms.js';
 import { loadChannelToken } from '../src/identity/tokens.js';
 import { REQUIRED_CHANNEL_SCOPES } from '../src/identity/twitch.js';
 import { attachAccounts, type AccountHandlers } from '../src/identity/runtime.js';

@@ -7,6 +7,9 @@ import type { TwitchUser } from '../src/identity/identities.js';
 import { TICKETS_EVENTS } from '../src/kernels/tickets/index.js';
 import { AT } from './helpers/db.js';
 import { ctx } from './helpers/fixtures.js';
+import { accountAuthorizer, accountTeamAuthorizer } from '../src/identity/account/authorizer.js';
+import { pgBanDirectory, pgTeamDirectory } from '../src/identity/team-directory.js';
+import { allAdmins } from '../src/platform/admin.js';
 import { ALICE, BOB, connect, login, setupApi, type ApiSetup } from './helpers/api.js';
 
 let s: ApiSetup | undefined;
@@ -227,5 +230,24 @@ describe('Portal-API', () => {
     const tooMany = await post(api, `/api/portal/giveaways/${GID_A}/kernel-commands`, bob.cookie, { type: 'buy_tickets', args: { count: 9 } });
     expect(tooMany.statusCode).toBe(400);
     expect(tooMany.json().code).toBe('not_enough_coins');
+  });
+});
+
+describe('Portal und Plattform-Sperre (Teilprojekt 8c)', () => {
+  it('a banned streamer can still register as a participant in another giveaway, but controls no giveaway (403 account_banned)', async () => {
+    // Echte Rechte: nur so greift die Sperre bei Streamer-Befehlen.
+    s = await setupApi({ admins: allAdmins, auth: accountAuthorizer(), teamAuth: accountTeamAuthorizer(), teamDirectory: pgTeamDirectory(), bans: pgBanDirectory() });
+    const api = s;
+    const alice = await complete(api, ALICE);
+    const bob = await complete(api, BOB);
+    await must(api, api.rt.handlers.create, { giveawayId: GID_A, teamId: bob.soloTeamId, kernelId: 'instant', settings: { prize: 'Key', channels: [bob.pid] } }, bob.actor);
+    await must(api, api.rt.handlers.open, { giveawayId: GID_A }, bob.actor);
+    await must(api, api.rt.handlers.kernelCommand, { giveawayId: GID_A, command: { type: 'open_window', args: {} } }, bob.actor);
+    const banned = await api.rt.bus.execute(api.platform.ban, { pid: alice.pid, reason: 'Bot-Verhalten' }, ctx({ actor: bob.actor }));
+    if (!banned.ok) throw new Error(banned.rejection.code);
+    expect((await post(api, `/api/portal/giveaways/${GID_A}/register`, alice.cookie)).statusCode).toBe(200);
+    const create = await api.app.inject({ method: 'POST', url: '/api/giveaways', headers: alice.h, payload: { teamId: alice.soloTeamId, kernelId: 'instant', settings: { prize: 'Key', channels: [alice.pid] } } });
+    expect(create.statusCode).toBe(403);
+    expect(create.json()).toMatchObject({ code: 'account_banned' });
   });
 });

@@ -8,6 +8,8 @@ import type { Subscriber } from '../framework/subscriber.js';
 import type { Runtime } from '../framework/runtime.js';
 import { findPidByTwitchId } from '../identity/identities.js';
 import type { AccountHandlers } from '../identity/runtime.js';
+import type { AdminCheck } from '../platform/admin.js';
+import type { PlatformHandlers } from '../platform/runtime.js';
 import { SESSION_COOKIE, SESSION_TTL_DAYS, createSession, deleteSession } from '../identity/sessions.js';
 import { REQUIRED_CHANNEL_SCOPES, TwitchError, type TwitchAuthClient } from '../identity/twitch.js';
 import { parseCookies, serializeCookie } from './cookies.js';
@@ -17,6 +19,10 @@ import { sessionOf } from './session.js';
 export interface ApiDeps {
   rt: Runtime;
   accounts: AccountHandlers;
+  /** Befehle des Stroms platform (NEW_DESIGN.md 11.4). */
+  platform: PlatformHandlers;
+  /** Wer Superadmin ist (ADMIN_TWITCH_IDS). */
+  admins: AdminCheck;
   /** Rechte für Lese-Routen der Streamer-App (dieselbe Prüfung wie die Giveaway-Befehle). */
   auth: GiveawayAuthorizer;
   /** Bedingungsprüfung auf Anfrage im Portal (NEW_DESIGN.md 6.5). Ohne Prüfer antwortet die Route mit no_checker. */

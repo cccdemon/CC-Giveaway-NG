@@ -13,6 +13,8 @@ import { accountLegalSource } from '../identity/account/legal-source.js';
 import { loadTokenKey } from '../identity/crypto.js';
 import { identityResolver } from '../identity/resolver.js';
 import { attachAccounts } from '../identity/runtime.js';
+import { twitchIdAdmins } from '../platform/admin.js';
+import { attachPlatform } from '../platform/runtime.js';
 import { twitchAuthClient } from '../identity/twitch.js';
 import { helixGateChecker } from '../ingest/twitch/gates.js';
 import { appTokenSource, helixClient } from '../ingest/twitch/helix.js';
@@ -47,11 +49,13 @@ async function main() {
     teamAuth: accountTeamAuthorizer(), teamDirectory: pgTeamDirectory(), bans: pgBanDirectory(),
   });
   const accounts = attachAccounts(rt, { tokenKey });
+  const admins = twitchIdAdmins(config.adminTwitchIds);
+  const platform = attachPlatform(rt, { admins });
   // Live-Push: eigene Redis-Verbindung im Abo-Modus (NEW_DESIGN.md 3.2).
   const subscriber = new RedisSubscriber(new Redis(config.redisUrl));
   await subscriber.start();
   const app = buildApp(
-    { pool, api: { rt, accounts, auth: accountAuthorizer(), gates, subscriber, twitch, publicUrl: config.publicUrl, secureCookies: config.nodeEnv === 'production' } },
+    { pool, api: { rt, accounts, platform, admins, auth: accountAuthorizer(), gates, subscriber, twitch, publicUrl: config.publicUrl, secureCookies: config.nodeEnv === 'production' } },
     { logger: { level: config.logLevel } },
   );
   subscriber.onError((err) => {
