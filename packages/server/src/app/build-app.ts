@@ -3,6 +3,7 @@ import type pg from 'pg';
 import { registerAuthRoutes, type ApiDeps } from '../api/auth.js';
 import { registerMeRoutes } from '../api/me.js';
 import { registerGiveawayRoutes } from '../api/giveaways.js';
+import { registerPortalRoutes } from '../api/portal.js';
 import { registerTeamRoutes } from '../api/teams.js';
 
 export type { ApiDeps } from '../api/auth.js';
@@ -32,6 +33,7 @@ export function buildApp(deps: AppDeps, opts: { logger?: FastifyServerOptions['l
     registerMeRoutes(app, deps.api, deps.pool);
     registerTeamRoutes(app, deps.api, deps.pool);
     registerGiveawayRoutes(app, deps.api, deps.pool);
+    registerPortalRoutes(app, deps.api, deps.pool);
   }
   return app;
 }

@@ -38,14 +38,15 @@ async function main() {
   const now = () => new Date();
   const helix = helixClient({ clientId: config.twitchClientId, appToken: appTokenSource({ clientId: config.twitchClientId, clientSecret: config.twitchClientSecret, now }), now });
   const tokens = channelTokenProvider({ pool, key: tokenKey, auth: twitch, now, log });
+  const gates = helixGateChecker({ helix, tokens });
   const rt = createRuntime({
     pool, publisher: new RedisPublisher(redis), auth: accountAuthorizer(), legalSource: accountLegalSource(), identities: identityResolver(),
-    activity: pgChannelActivity(), gates: helixGateChecker({ helix, tokens }), log,
+    activity: pgChannelActivity(), gates, log,
     teamAuth: accountTeamAuthorizer(), teamDirectory: pgTeamDirectory(), bans: pgBanDirectory(),
   });
   const accounts = attachAccounts(rt, { tokenKey });
   const app = buildApp(
-    { pool, api: { rt, accounts, auth: accountAuthorizer(), twitch, publicUrl: config.publicUrl, secureCookies: config.nodeEnv === 'production' } },
+    { pool, api: { rt, accounts, auth: accountAuthorizer(), gates, twitch, publicUrl: config.publicUrl, secureCookies: config.nodeEnv === 'production' } },
     { logger: { level: config.logLevel } },
   );
   app.addHook('onClose', async () => {

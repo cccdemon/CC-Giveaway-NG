@@ -3,6 +3,7 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type pg from 'pg';
 import type { GiveawayAuthorizer } from '../framework/giveaway/authorize.js';
+import type { GateChecker } from '../framework/giveaway/gates.js';
 import type { Runtime } from '../framework/runtime.js';
 import { findPidByTwitchId } from '../identity/identities.js';
 import type { AccountHandlers } from '../identity/runtime.js';
@@ -17,6 +18,8 @@ export interface ApiDeps {
   accounts: AccountHandlers;
   /** Rechte für Lese-Routen der Streamer-App (dieselbe Prüfung wie die Giveaway-Befehle). */
   auth: GiveawayAuthorizer;
+  /** Bedingungsprüfung auf Anfrage im Portal (NEW_DESIGN.md 6.5). Ohne Prüfer antwortet die Route mit no_checker. */
+  gates?: GateChecker;
   twitch: TwitchAuthClient;
   /** Öffentliche Basis-URL ohne Schrägstrich am Ende. */
   publicUrl: string;

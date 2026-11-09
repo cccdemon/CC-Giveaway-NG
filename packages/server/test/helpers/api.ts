@@ -66,7 +66,7 @@ export async function setupApi(over: Partial<Omit<RuntimeOptions, 'pool' | 'publ
   const clock = { now: AT };
   const app = buildApp({
     pool: db.pool,
-    api: { rt, accounts, auth: over.auth ?? allowAll, twitch: twitch.client, publicUrl: PUBLIC_URL, secureCookies: true, now: () => clock.now },
+    api: { rt, accounts, auth: over.auth ?? allowAll, ...(over.gates ? { gates: over.gates } : {}), twitch: twitch.client, publicUrl: PUBLIC_URL, secureCookies: true, now: () => clock.now },
   });
   return {
     pool: db.pool, app, rt, accounts, twitch, clock,

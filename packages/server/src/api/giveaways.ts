@@ -10,6 +10,7 @@ import type { ChangeSettingsCmd, CreateGiveawayCmd, GiveawayCmd } from '../frame
 import { giveawayStream, type GiveawayState, type GiveawayStatus, type WinnerStatus } from '../framework/giveaway/state.js';
 import { channelStatusView } from '../ingest/status-view.js';
 import type { ApiDeps } from './auth.js';
+import { bodyOf, executeAs } from './commands.js';
 import { giveawayDetail, historyPage, kernelInfo, loadGiveaway, participantRows } from './giveaways-read.js';
 import { rejectionToHttp } from './http.js';
 import { requireSession } from './session.js';
@@ -114,15 +115,9 @@ export function registerGiveawayRoutes(app: FastifyInstance, deps: ApiDeps, pool
 
   // --- Befehle (NEW_DESIGN.md 7.1–7.3, 6.3): jeder läuft über den Bus mit der Sitzung als Akteur und antwortet mit den geschriebenen Ereignissen.
 
-  const execute = async <C, P, Q>(req: FastifyRequest, reply: FastifyReply, h: CommandHandler<C, GiveawayState, P, Q>, cmd: C, status = 200, extra: Record<string, unknown> = {}): Promise<void> => {
-    const r = await deps.rt.bus.execute(h, cmd, { actor: `user:${req.session!.pid}`, correlationId: randomUUID(), now: now(), ip: req.ip });
-    if (!r.ok) {
-      await send(reply, rejectionToHttp(r.rejection));
-      return;
-    }
-    await reply.code(status).send({ ...extra, events: r.events.map((e) => ({ id: e.id, seq: e.seq, type: e.type })) });
-  };
-  const body = <T>(req: FastifyRequest): Partial<T> => (typeof req.body === 'object' && req.body !== null ? (req.body as Partial<T>) : {});
+  const execute = <C, P, Q>(req: FastifyRequest, reply: FastifyReply, h: CommandHandler<C, GiveawayState, P, Q>, cmd: C, status = 200, extra: Record<string, unknown> = {}) =>
+    executeAs(deps, req, reply, h, cmd, status, extra);
+  const body = bodyOf;
   const idOf = (req: FastifyRequest<IdParams>) => (UUID_RE.test(req.params.id) ? req.params.id : null);
   /** Befehle auf ein Giveaway: eine ungültige ID ist „nicht gefunden“, der Rest läuft über authorize des Handlers. */
   const onGiveaway =
