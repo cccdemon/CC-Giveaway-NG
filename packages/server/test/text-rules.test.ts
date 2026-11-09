@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BANNED_WORDS, MAX_WORDS, checkText, extractUiTexts } from '../src/shared/text-rules.js';
+import { BANNED_WORDS, LABEL_MAX_WORDS, MAX_WORDS, checkLabel, checkText, extractAllStrings, extractUiTexts } from '../src/shared/text-rules.js';
 
 const words = (n: number) => Array.from({ length: n }, (_, i) => `Wort${i + 1}`).join(' ');
 
@@ -49,6 +49,36 @@ describe('Textregeln (NEW_DESIGN.md 11.6)', () => {
       { text: 'Niemand ist angemeldet.', line: 12 },
       { text: 'Nach der Ziehung geht das nicht mehr.', line: 13 },
       { text: 'Nur du selbst.', line: 14 },
+    ]);
+  });
+});
+
+describe('Beschriftungen und ganze Dateien (Teilprojekt 8b)', () => {
+  it('checkLabel allows a label without a period, rejects a semicolon, a banned word and 7 words', () => {
+    expect(LABEL_MAX_WORDS).toBe(6);
+    expect(checkLabel('Giveaway starten')).toEqual([]);
+    expect(checkLabel('Weiter: Rechtstexte')).toEqual([]);
+    expect(checkLabel(words(6))).toEqual([]);
+    expect(checkLabel(words(7))).toEqual(['zu_lang']);
+    expect(checkLabel('Erst prüfen; dann ziehen')).toEqual(['semikolon']);
+    expect(checkLabel('Die nahtlose Verbindung')).toEqual(['bannwort:nahtlos']);
+  });
+
+  it('extractAllStrings finds single- and backtick-quoted strings with line numbers, skips import lines and comments', () => {
+    const src = [
+      "import { x } from './x.js';",
+      "// 'Kommentar' bleibt draußen",
+      '/* `auch` dieser */',
+      'export const L = {',
+      "  a: 'Giveaway starten',",
+      '  b: (n: number) => `Noch ${n} Tage`,',
+      "  c: 'Mit \\'Zitat\\'',",
+      '};',
+    ].join('\n');
+    expect(extractAllStrings(src)).toEqual([
+      { text: 'Giveaway starten', line: 5 },
+      { text: 'Noch ${n} Tage', line: 6 },
+      { text: "Mit 'Zitat'", line: 7 },
     ]);
   });
 });

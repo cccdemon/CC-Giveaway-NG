@@ -11,6 +11,9 @@ import { WS_MAX_PAYLOAD, registerNoPush, registerWsRoutes } from '../api/ws.js';
 
 export type { ApiDeps } from '../api/auth.js';
 
+/** Präfix aller API-Routen. Nur /healthz liegt an der Wurzel. */
+export const API_PREFIX = '/api';
+
 export interface AppDeps {
   pool: pg.Pool;
   /** Ohne api gibt es nur /healthz (Tests des Fundaments). */
@@ -32,23 +35,29 @@ export function buildApp(deps: AppDeps, opts: { logger?: FastifyServerOptions['l
     }
   });
   if (deps.api) {
-    registerAuthRoutes(app, deps.api, deps.pool);
-    registerMeRoutes(app, deps.api, deps.pool);
-    registerTeamRoutes(app, deps.api, deps.pool);
-    registerGiveawayRoutes(app, deps.api, deps.pool);
-    registerPortalRoutes(app, deps.api, deps.pool);
+    const api = deps.api;
     app.decorate('wsSockets', new Set<WebSocket>());
-    if (deps.api.subscriber) {
-      const api = deps.api;
-      // Das WebSocket-Plugin braucht einen eigenen Kontext: die Route darf erst nach dem Plugin entstehen.
-      void app.register(async (inst) => {
-        // Protokollnachrichten sind klein. Ohne Grenze nähme ws 100 MiB an.
-        await inst.register(websocket, { options: { maxPayload: WS_MAX_PAYLOAD } });
-        registerWsRoutes(inst, api, deps.pool);
-      });
-    } else {
-      registerNoPush(app);
-    }
+    // Alle Routen außer /healthz unter /api: so kollidieren Seiten der Web-App und API-Pfade nicht (Teilprojekt 8b).
+    void app.register(
+      async (inst) => {
+        registerAuthRoutes(inst, api, deps.pool);
+        registerMeRoutes(inst, api, deps.pool);
+        registerTeamRoutes(inst, api, deps.pool);
+        registerGiveawayRoutes(inst, api, deps.pool);
+        registerPortalRoutes(inst, api, deps.pool);
+        if (api.subscriber) {
+          // Das WebSocket-Plugin braucht einen eigenen Kontext: die Route darf erst nach dem Plugin entstehen.
+          await inst.register(async (ws) => {
+            // Protokollnachrichten sind klein. Ohne Grenze nähme ws 100 MiB an.
+            await ws.register(websocket, { options: { maxPayload: WS_MAX_PAYLOAD } });
+            registerWsRoutes(ws, api, deps.pool);
+          });
+        } else {
+          registerNoPush(inst);
+        }
+      },
+      { prefix: API_PREFIX },
+    );
   }
   return app;
 }

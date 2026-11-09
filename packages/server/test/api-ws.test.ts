@@ -24,9 +24,9 @@ const GID_B = '66666666-6666-4666-8666-666666666662';
 async function complete(api: ApiSetup, user: TwitchUser) {
   const { cookie } = await login(api, user);
   const h = { cookie, 'content-type': 'application/json' };
-  await api.app.inject({ method: 'POST', url: '/me/terms', headers: h, payload: { version: 1 } });
+  await api.app.inject({ method: 'POST', url: '/api/me/terms', headers: h, payload: { version: 1 } });
   await connect(api, cookie, user);
-  const me = (await api.app.inject({ method: 'GET', url: '/me', headers: { cookie } })).json();
+  const me = (await api.app.inject({ method: 'GET', url: '/api/me', headers: { cookie } })).json();
   return { cookie, pid: me.pid as string, soloTeamId: me.soloTeamId as string, actor: `user:${me.pid as string}` };
 }
 
@@ -39,7 +39,7 @@ async function must<C, P, Q>(api: ApiSetup, h: CommandHandler<C, GiveawayState, 
 async function listen(api: ApiSetup): Promise<string> {
   await api.app.listen({ port: 0, host: '127.0.0.1' });
   const addr = api.app.server.address() as AddressInfo;
-  return `ws://127.0.0.1:${addr.port}/ws`;
+  return `ws://127.0.0.1:${addr.port}/api/ws`;
 }
 
 /** Verbindet und sammelt alle Nachrichten; `next()` wartet auf die nächste, `closed` auf das Ende. */

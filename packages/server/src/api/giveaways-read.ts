@@ -9,7 +9,8 @@ import type { Runtime } from '../framework/runtime.js';
 import { loadStreamState } from '../framework/state.js';
 import { displayNamesOf, displayNameOf } from '../identity/identities.js';
 import { channelStatusView, type ChannelStatusView } from '../ingest/status-view.js';
-import { readStreamPage, revertedIds } from '../journal/journal.js';
+import { readEvent, readStreamPage, revertedIds } from '../journal/journal.js';
+import type { EventTypeRegistry } from '../journal/event-types.js';
 import type { EventRecord, StreamId } from '../journal/types.js';
 import type { AnyKernel, Pid } from '../kernel-api/index.js';
 
@@ -64,16 +65,30 @@ export interface GiveawayDetail {
   winners: { pid: Pid; displayName: string; status: WinnerStatus }[];
   draws: GiveawayState['draws'];
   channels: NamedChannelStatus[];
+  /** Zeitpunkt der gültigen Ziehung, null ohne. Meldefrist = drawnAt + claimDays (NEW_DESIGN.md 7.3). */
+  drawnAt: string | null;
   closedAt: string | null;
   purgedAt: string | null;
+}
+
+/** Zeitpunkt der gültigen (nicht aufgehobenen) Ziehung aus dem Journal, null ohne Ziehung. */
+export async function drawnAtOf(c: Queryable, registry: EventTypeRegistry, state: GiveawayState): Promise<string | null> {
+  const draw = [...state.draws].reverse().find((d) => !d.voided);
+  if (!draw) return null;
+  const e = await readEvent(c, registry, draw.eventId);
+  return e ? e.createdAt.toISOString() : null;
 }
 
 export async function giveawayDetail(c: Queryable, rt: Runtime, id: string, state: GiveawayState, now: Date): Promise<GiveawayDetail> {
   const kernel = rt.kernels.get(state.kernelId);
   const pool = kernel.pool(state.kernelState, state.settings.config);
   const winnerPids = Object.keys(state.winners);
-  const names = await displayNamesOf(c, [...state.settings.channels, ...winnerPids]);
-  const channels = (await channelStatusView(c, state.settings.channels, now)).map((v) => ({ ...v, displayName: names.get(v.pid) ?? displayNameOf(null, v.pid) }));
+  const [names, statuses, drawnAt] = await Promise.all([
+    displayNamesOf(c, [...state.settings.channels, ...winnerPids]),
+    channelStatusView(c, state.settings.channels, now),
+    drawnAtOf(c, rt.registry, state),
+  ]);
+  const channels = statuses.map((v) => ({ ...v, displayName: names.get(v.pid) ?? displayNameOf(null, v.pid) }));
   return {
     id,
     teamId: state.teamId,
@@ -88,6 +103,7 @@ export async function giveawayDetail(c: Queryable, rt: Runtime, id: string, stat
     winners: winnerPids.sort().map((pid) => ({ pid, displayName: names.get(pid) ?? displayNameOf(null, pid), status: state.winners[pid]! })),
     draws: state.draws,
     channels,
+    drawnAt,
     closedAt: state.closedAt,
     purgedAt: state.purgedAt,
   };
@@ -153,21 +169,43 @@ export interface HistoryEntry {
 
 export const HISTORY_LIMIT_DEFAULT = 50;
 
-/** Eine Seite des Verlaufs, neueste zuerst. nextBeforeSeq ist null, wenn die Seite nicht voll war oder bei seq 1 endet. */
+const UUID_IN_PAYLOAD_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+/** Alle UUID-Zeichenketten in einer Payload (rekursiv), Kandidaten für pids. */
+export function uuidsIn(value: unknown, out = new Set<string>()): Set<string> {
+  if (typeof value === 'string') {
+    if (UUID_IN_PAYLOAD_RE.test(value)) out.add(value);
+  } else if (Array.isArray(value)) {
+    for (const v of value) uuidsIn(v, out);
+  } else if (typeof value === 'object' && value !== null) {
+    for (const v of Object.values(value)) uuidsIn(v, out);
+  }
+  return out;
+}
+
+/**
+ * Eine Seite des Verlaufs, neueste zuerst. nextBeforeSeq ist null, wenn die Seite nicht voll war oder bei seq 1 endet.
+ * names: Anzeigenamen aller pids in den Payloads der Seite, die in identities stehen (Verlaufstexte der Oberfläche).
+ */
 export async function historyPage(
   c: Queryable,
   rt: Runtime,
   stream: StreamId,
   o: { beforeSeq?: number; limit?: number },
-): Promise<{ entries: HistoryEntry[]; nextBeforeSeq: number | null }> {
+): Promise<{ entries: HistoryEntry[]; nextBeforeSeq: number | null; names: Record<string, string> }> {
   const limit = Math.min(200, Math.max(1, Math.trunc(o.limit ?? HISTORY_LIMIT_DEFAULT)));
   const events = await readStreamPage(c, rt.registry, stream, { ...(o.beforeSeq === undefined ? {} : { beforeSeq: o.beforeSeq }), limit });
-  const pids = events.map((e) => pidOfActor(e.actor)).filter((p): p is string => p !== null);
-  // Zwei Abfragen je Seite statt einer je Eintrag: Namen und Umkehrstatus im Bündel.
-  const [names, reverted] = await Promise.all([displayNamesOf(c, pids), revertedIds(c, events.map((e) => e.id))]);
+  const actorPids = events.map((e) => pidOfActor(e.actor)).filter((p): p is string => p !== null);
+  const payloadPids = [...uuidsIn(events.map((e) => e.payload))];
+  // Drei Abfragen je Seite statt einer je Eintrag: Namen der Akteure, Namen in den Payloads, Umkehrstatus im Bündel.
+  const [names, payloadNames, reverted] = await Promise.all([
+    displayNamesOf(c, actorPids),
+    displayNamesOf(c, payloadPids),
+    revertedIds(c, events.map((e) => e.id)),
+  ]);
   const entries = events.map((e) => historyEntry(rt, e, names, reverted.has(e.id)));
   const last = entries.at(-1);
-  return { entries, nextBeforeSeq: last !== undefined && entries.length === limit && last.seq > 1 ? last.seq : null };
+  return { entries, nextBeforeSeq: last !== undefined && entries.length === limit && last.seq > 1 ? last.seq : null, names: Object.fromEntries(payloadNames) };
 }
 
 function historyEntry(rt: Runtime, e: EventRecord, names: Map<string, string>, reverted: boolean): HistoryEntry {

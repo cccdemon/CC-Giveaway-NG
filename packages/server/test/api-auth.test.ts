@@ -16,11 +16,11 @@ afterEach(async () => {
 describe('Twitch-Anmeldung', () => {
   it('login redirects to twitch with state cookie, callback creates identity and session, GET /me answers', async () => {
     s = await setupApi();
-    const start = await s.app.inject({ method: 'GET', url: '/auth/twitch/login?return=%2Fdashboard' });
+    const start = await s.app.inject({ method: 'GET', url: '/api/auth/twitch/login?return=%2Fdashboard' });
     expect(start.statusCode).toBe(302);
     const loc = new URL(start.headers.location as string);
     expect(loc.origin).toBe('https://id.stub');
-    expect(loc.searchParams.get('redirect_uri')).toBe(`${PUBLIC_URL}/auth/twitch/callback`);
+    expect(loc.searchParams.get('redirect_uri')).toBe(`${PUBLIC_URL}/api/auth/twitch/callback`);
     expect(loc.searchParams.get('scope')).toBe('');
     const state = loc.searchParams.get('state')!;
     expect(state.length).toBeGreaterThanOrEqual(32);
@@ -32,7 +32,7 @@ describe('Twitch-Anmeldung', () => {
     expect(setCookie).toMatch(/Path=\//);
 
     const oauth = cookiesOf(start).ccg_oauth!;
-    const cb = await s.app.inject({ method: 'GET', url: `/auth/twitch/callback?code=c1&state=${state}`, headers: { cookie: `ccg_oauth=${oauth}` } });
+    const cb = await s.app.inject({ method: 'GET', url: `/api/auth/twitch/callback?code=c1&state=${state}`, headers: { cookie: `ccg_oauth=${oauth}` } });
     expect(cb.statusCode).toBe(302);
     expect(cb.headers.location).toBe('/dashboard');
     expect(s.twitch.exchanged).toEqual(['c1']);
@@ -42,7 +42,7 @@ describe('Twitch-Anmeldung', () => {
 
     const pid = await findPidByTwitchId(s.pool, ALICE.id);
     expect(pid).toBeTruthy();
-    const me = await s.app.inject({ method: 'GET', url: '/me', headers: { cookie: cookieHeader({ ccg_session: cookies.ccg_session! }) } });
+    const me = await s.app.inject({ method: 'GET', url: '/api/me', headers: { cookie: cookieHeader({ ccg_session: cookies.ccg_session! }) } });
     expect(me.statusCode).toBe(200);
     expect(me.json()).toMatchObject({ pid, login: 'alice', displayName: 'Alice', termsVersion: 0, currentTermsVersion: 1, channelConnected: false });
     expect(me.json().soloTeamId).toMatch(/^[0-9a-f-]{36}$/);
@@ -51,13 +51,13 @@ describe('Twitch-Anmeldung', () => {
 
   it('callback with wrong state is rejected and exchanges no code', async () => {
     s = await setupApi();
-    const start = await s.app.inject({ method: 'GET', url: '/auth/twitch/login' });
+    const start = await s.app.inject({ method: 'GET', url: '/api/auth/twitch/login' });
     const oauth = cookiesOf(start).ccg_oauth!;
-    const wrong = await s.app.inject({ method: 'GET', url: '/auth/twitch/callback?code=c1&state=falsch', headers: { cookie: `ccg_oauth=${oauth}` } });
+    const wrong = await s.app.inject({ method: 'GET', url: '/api/auth/twitch/callback?code=c1&state=falsch', headers: { cookie: `ccg_oauth=${oauth}` } });
     expect(wrong.statusCode).toBe(400);
     expect(wrong.json()).toEqual({ code: 'oauth_state', message: 'Die Anmeldung ist abgelaufen. Starte sie neu.' });
     const state = new URL(start.headers.location as string).searchParams.get('state')!;
-    const noCookie = await s.app.inject({ method: 'GET', url: `/auth/twitch/callback?code=c1&state=${state}` });
+    const noCookie = await s.app.inject({ method: 'GET', url: `/api/auth/twitch/callback?code=c1&state=${state}` });
     expect(noCookie.statusCode).toBe(400);
     expect(noCookie.json().code).toBe('oauth_state');
     expect(s.twitch.exchanged).toEqual([]);
@@ -65,18 +65,18 @@ describe('Twitch-Anmeldung', () => {
 
   it('callback with ?error answers twitch_denied, exchange failure answers with the twitch code', async () => {
     s = await setupApi();
-    const start = await s.app.inject({ method: 'GET', url: '/auth/twitch/login' });
+    const start = await s.app.inject({ method: 'GET', url: '/api/auth/twitch/login' });
     const oauth = cookiesOf(start).ccg_oauth!;
     const state = new URL(start.headers.location as string).searchParams.get('state')!;
-    const denied = await s.app.inject({ method: 'GET', url: `/auth/twitch/callback?error=access_denied&state=${state}`, headers: { cookie: `ccg_oauth=${oauth}` } });
+    const denied = await s.app.inject({ method: 'GET', url: `/api/auth/twitch/callback?error=access_denied&state=${state}`, headers: { cookie: `ccg_oauth=${oauth}` } });
     expect(denied.statusCode).toBe(400);
     expect(denied.json()).toEqual({ code: 'twitch_denied', message: 'Twitch hat die Anmeldung abgelehnt. Starte die Anmeldung neu.' });
 
-    const again = await s.app.inject({ method: 'GET', url: '/auth/twitch/login' });
+    const again = await s.app.inject({ method: 'GET', url: '/api/auth/twitch/login' });
     s.twitch.fail = new TwitchError('twitch_unreachable');
     const failed = await s.app.inject({
       method: 'GET',
-      url: `/auth/twitch/callback?code=c2&state=${new URL(again.headers.location as string).searchParams.get('state')}`,
+      url: `/api/auth/twitch/callback?code=c2&state=${new URL(again.headers.location as string).searchParams.get('state')}`,
       headers: { cookie: `ccg_oauth=${cookiesOf(again).ccg_oauth}` },
     });
     expect(failed.statusCode).toBe(502);
@@ -86,25 +86,25 @@ describe('Twitch-Anmeldung', () => {
   it('second login of the same twitch user reuses the pid, a different user gets another pid', async () => {
     s = await setupApi();
     const a = await login(s, ALICE);
-    const pidA = (await s.app.inject({ method: 'GET', url: '/me', headers: { cookie: a.cookie } })).json().pid;
+    const pidA = (await s.app.inject({ method: 'GET', url: '/api/me', headers: { cookie: a.cookie } })).json().pid;
     const a2 = await login(s, ALICE);
-    expect((await s.app.inject({ method: 'GET', url: '/me', headers: { cookie: a2.cookie } })).json().pid).toBe(pidA);
+    expect((await s.app.inject({ method: 'GET', url: '/api/me', headers: { cookie: a2.cookie } })).json().pid).toBe(pidA);
     const b = await login(s, BOB);
-    expect((await s.app.inject({ method: 'GET', url: '/me', headers: { cookie: b.cookie } })).json().pid).not.toBe(pidA);
+    expect((await s.app.inject({ method: 'GET', url: '/api/me', headers: { cookie: b.cookie } })).json().pid).not.toBe(pidA);
     expect((await s.pool.query('SELECT count(*)::int AS n FROM events')).rows[0]).toEqual({ n: 2 });
   });
 
   it('connect requires a session, stores the token, GET /me shows channelConnected', async () => {
     s = await setupApi();
-    expect((await s.app.inject({ method: 'GET', url: '/auth/twitch/connect' })).statusCode).toBe(401);
+    expect((await s.app.inject({ method: 'GET', url: '/api/auth/twitch/connect' })).statusCode).toBe(401);
     const { cookie } = await login(s);
-    const start = await s.app.inject({ method: 'GET', url: '/auth/twitch/connect', headers: { cookie } });
+    const start = await s.app.inject({ method: 'GET', url: '/api/auth/twitch/connect', headers: { cookie } });
     expect(start.statusCode).toBe(302);
     expect(new URL(start.headers.location as string).searchParams.get('scope')).toBe('moderator:read:followers moderator:read:chatters channel:bot');
     const res = await connect(s, cookie);
     expect(res.statusCode).toBe(302);
     expect(res.headers.location).toBe('/');
-    const me = (await s.app.inject({ method: 'GET', url: '/me', headers: { cookie } })).json();
+    const me = (await s.app.inject({ method: 'GET', url: '/api/me', headers: { cookie } })).json();
     expect(me.channelConnected).toBe(true);
     expect((await loadChannelToken(s.pool, me.pid, KEY))?.accessToken).toBe('acc-connect-alice');
   });
@@ -119,7 +119,7 @@ describe('Twitch-Anmeldung', () => {
     const missing = await connect(s, cookie, ALICE);
     expect(missing.statusCode).toBe(400);
     expect(missing.json().code).toBe('scopes_missing');
-    const me = (await s.app.inject({ method: 'GET', url: '/me', headers: { cookie } })).json();
+    const me = (await s.app.inject({ method: 'GET', url: '/api/me', headers: { cookie } })).json();
     expect(me.channelConnected).toBe(false);
     expect(await loadChannelToken(s.pool, me.pid, KEY)).toBeNull();
   });
@@ -127,35 +127,35 @@ describe('Twitch-Anmeldung', () => {
   it('logout deletes the session, GET /me is 401 afterwards; expired or unknown session is 401', async () => {
     s = await setupApi();
     const { cookie } = await login(s);
-    const out = await s.app.inject({ method: 'POST', url: '/auth/logout', headers: { cookie } });
+    const out = await s.app.inject({ method: 'POST', url: '/api/auth/logout', headers: { cookie } });
     expect(out.statusCode).toBe(204);
     expect(String(out.headers['set-cookie'])).toMatch(/ccg_session=;.*Max-Age=0/);
-    const me = await s.app.inject({ method: 'GET', url: '/me', headers: { cookie } });
+    const me = await s.app.inject({ method: 'GET', url: '/api/me', headers: { cookie } });
     expect(me.statusCode).toBe(401);
     expect(me.json()).toEqual({ code: 'no_session', message: 'Melde dich an.' });
 
     const fresh = await login(s);
     s.clock.now = new Date(AT.getTime() + SESSION_TTL_DAYS * 86_400_000);
-    expect((await s.app.inject({ method: 'GET', url: '/me', headers: { cookie: fresh.cookie } })).statusCode).toBe(401);
-    expect((await s.app.inject({ method: 'GET', url: '/me', headers: { cookie: 'ccg_session=unbekannt' } })).statusCode).toBe(401);
-    expect((await s.app.inject({ method: 'POST', url: '/auth/logout' })).statusCode).toBe(204);
+    expect((await s.app.inject({ method: 'GET', url: '/api/me', headers: { cookie: fresh.cookie } })).statusCode).toBe(401);
+    expect((await s.app.inject({ method: 'GET', url: '/api/me', headers: { cookie: 'ccg_session=unbekannt' } })).statusCode).toBe(401);
+    expect((await s.app.inject({ method: 'POST', url: '/api/auth/logout' })).statusCode).toBe(204);
   });
 
   it('GET /auth/twitch/bot starts a login flow with the bot scopes and the callback signs the bot in', async () => {
     s = await setupApi();
     s.twitch.user = { id: '999', login: 'ccg_bot', displayName: 'CCG Bot' };
-    const start = await s.app.inject({ method: 'GET', url: '/auth/twitch/bot' });
+    const start = await s.app.inject({ method: 'GET', url: '/api/auth/twitch/bot' });
     expect(start.statusCode).toBe(302);
     const url = new URL(start.headers.location as string);
     expect(url.searchParams.get('scope')).toBe(BOT_SCOPES.join(' '));
     const state = url.searchParams.get('state')!;
     const oauth = cookiesOf(start).ccg_oauth!;
-    const cb = await s.app.inject({ method: 'GET', url: `/auth/twitch/callback?code=bot-code&state=${state}`, headers: { cookie: `ccg_oauth=${oauth}` } });
+    const cb = await s.app.inject({ method: 'GET', url: `/api/auth/twitch/callback?code=bot-code&state=${state}`, headers: { cookie: `ccg_oauth=${oauth}` } });
     expect(cb.statusCode).toBe(302);
     expect(cb.headers.location).toBe('/');
     const session = cookiesOf(cb).ccg_session;
     expect(session).toBeTruthy();
-    const me = (await s.app.inject({ method: 'GET', url: '/me', headers: { cookie: `ccg_session=${session}` } })).json();
+    const me = (await s.app.inject({ method: 'GET', url: '/api/me', headers: { cookie: `ccg_session=${session}` } })).json();
     expect(me.login).toBe('ccg_bot');
   });
 

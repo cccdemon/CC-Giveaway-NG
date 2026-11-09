@@ -2,6 +2,8 @@
 // Rein, ohne I/O. Der Linter in scripts/text-lint.ts liest damit alle Texte im Quellcode.
 
 export const MAX_WORDS = 20;
+/** Beschriftungen (Knöpfe, Spalten, Navigation) sind kurz. */
+export const LABEL_MAX_WORDS = 6;
 
 /** Werbewörter und Floskeln, die in keinem Text stehen. Wortanfang zählt: „nahtlose“ ist „nahtlos“. */
 export const BANNED_WORDS: readonly string[] = [
@@ -49,6 +51,18 @@ export function checkText(text: string): string[] {
   return reasons;
 }
 
+/** Gründe, warum eine Beschriftung die Regeln verletzt: Bannliste, Semikolon, Länge. Kein Endsatzzeichen nötig. */
+export function checkLabel(text: string): string[] {
+  const reasons: string[] = [];
+  const plain = text.replace(HOLE_RE, 'X').trim();
+  if (wordCount(plain) > LABEL_MAX_WORDS) reasons.push('zu_lang');
+  if (plain.includes(';')) reasons.push('semikolon');
+  for (const word of BANNED_WORDS) {
+    if (new RegExp(`(?<!\\p{L})${escapeRe(word)}`, 'iu').test(plain)) reasons.push(`bannwort:${word}`);
+  }
+  return reasons;
+}
+
 export interface UiText {
   text: string;
   line: number;
@@ -67,6 +81,27 @@ export function extractUiTexts(source: string): UiText[] {
     const at = (m.index ?? 0) + m[1]!.length;
     const line = 1 + (source.slice(0, at).match(/\n/g)?.length ?? 0);
     out.push({ text: text.replace(/\\'/g, "'"), line });
+  }
+  return out;
+}
+
+const COMMENT_RE = /\/\*[\s\S]*?\*\/|\/\/[^\n]*/g;
+const ANY_STRING_RE = /'((?:[^'\\\n]|\\.)*)'|`((?:[^`\\]|\\.)*)`/g;
+
+/**
+ * Jede Zeichenkette einer Datei, in der nur UI-Texte stehen (labels.ts, sentences.ts der Web-App).
+ * Kommentare und Importzeilen zählen nicht. Platzhalter bleiben als ${…} erhalten.
+ */
+export function extractAllStrings(source: string): UiText[] {
+  // Kommentare durch gleich lange Leerzeichen ersetzen, damit Zeilennummern stimmen.
+  const stripped = source.replace(COMMENT_RE, (m) => m.replace(/[^\n]/g, ' '));
+  const out: UiText[] = [];
+  for (const m of stripped.matchAll(ANY_STRING_RE)) {
+    const at = m.index ?? 0;
+    const lineStart = stripped.lastIndexOf('\n', at - 1) + 1;
+    if (/^\s*import\b/.test(stripped.slice(lineStart, at))) continue;
+    const line = 1 + (stripped.slice(0, at).match(/\n/g)?.length ?? 0);
+    out.push({ text: (m[1] ?? m[2] ?? '').replace(/\\'/g, "'"), line });
   }
   return out;
 }

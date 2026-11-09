@@ -45,9 +45,9 @@ async function setup() {
 async function complete(api: ApiSetup, user: TwitchUser) {
   const { cookie } = await login(api, user);
   const h = { cookie, 'content-type': 'application/json' };
-  await api.app.inject({ method: 'POST', url: '/me/terms', headers: h, payload: { version: 1 } });
+  await api.app.inject({ method: 'POST', url: '/api/me/terms', headers: h, payload: { version: 1 } });
   await connect(api, cookie, user);
-  const me = (await api.app.inject({ method: 'GET', url: '/me', headers: { cookie } })).json();
+  const me = (await api.app.inject({ method: 'GET', url: '/api/me', headers: { cookie } })).json();
   return { cookie, h, pid: me.pid as string, soloTeamId: me.soloTeamId as string, actor: `user:${me.pid as string}` };
 }
 
@@ -78,7 +78,7 @@ describe('Portal-API', () => {
     const bob = await complete(api, BOB);
     await openInstant(api, alice, GID_A, { keyword: '!key' });
     await must(api, api.rt.handlers.register, { giveawayId: GID_A, pid: bob.pid }, bob.actor);
-    const r = await get(api, `/public/giveaways/${GID_A}`);
+    const r = await get(api, `/api/public/giveaways/${GID_A}`);
     expect(r.statusCode).toBe(200);
     expect(r.json()).toEqual({
       id: GID_A,
@@ -94,8 +94,8 @@ describe('Portal-API', () => {
       winnersCount: 1,
     });
     expect(r.body).not.toContain(bob.pid);
-    expect((await get(api, `/public/giveaways/${UNKNOWN}`)).statusCode).toBe(404);
-    expect((await get(api, '/public/giveaways/nope')).statusCode).toBe(404);
+    expect((await get(api, `/api/public/giveaways/${UNKNOWN}`)).statusCode).toBe(404);
+    expect((await get(api, '/api/public/giveaways/nope')).statusCode).toBe(404);
   });
 
   it('register and withdraw via the portal run as the session pid; register on a closed giveaway → 400 not_open', async () => {
@@ -103,18 +103,18 @@ describe('Portal-API', () => {
     const alice = await complete(api, ALICE);
     const bob = await complete(api, BOB);
     await openInstant(api, alice, GID_A);
-    const reg = await post(api, `/portal/giveaways/${GID_A}/register`, bob.cookie);
+    const reg = await post(api, `/api/portal/giveaways/${GID_A}/register`, bob.cookie);
     expect(reg.statusCode).toBe(200);
     expect(types(reg.json())).toEqual([GIVEAWAY_EVENTS.registered]);
     const actors = await api.pool.query('SELECT actor, payload FROM events WHERE stream = $1 AND type = $2', [giveawayStream(GID_A), GIVEAWAY_EVENTS.registered]);
     expect(actors.rows).toEqual([{ actor: bob.actor, payload: { pid: bob.pid } }]);
-    const wd = await post(api, `/portal/giveaways/${GID_A}/withdraw`, bob.cookie);
+    const wd = await post(api, `/api/portal/giveaways/${GID_A}/withdraw`, bob.cookie);
     expect(types(wd.json())).toEqual([GIVEAWAY_EVENTS.withdrawn]);
     await must(api, api.rt.handlers.close, { giveawayId: GID_A }, alice.actor);
-    const late = await post(api, `/portal/giveaways/${GID_A}/register`, bob.cookie);
+    const late = await post(api, `/api/portal/giveaways/${GID_A}/register`, bob.cookie);
     expect(late.statusCode).toBe(400);
     expect(late.json()).toEqual({ code: 'not_open', message: 'Das Giveaway nimmt gerade keine Anmeldungen an.' });
-    expect((await post(api, `/portal/giveaways/${GID_A}/register`, 'ccg_session=nope')).statusCode).toBe(401);
+    expect((await post(api, `/api/portal/giveaways/${GID_A}/register`, 'ccg_session=nope')).statusCode).toBe(401);
   });
 
   it('GET /portal/giveaways lists my participations with chance; detail shows view, gates and winner info after a draw', async () => {
@@ -123,13 +123,13 @@ describe('Portal-API', () => {
     const bob = await complete(api, BOB);
     await openInstant(api, alice, GID_A);
     await openInstant(api, alice, GID_B);
-    await post(api, `/portal/giveaways/${GID_A}/register`, bob.cookie);
-    const list = await get(api, '/portal/giveaways', bob.cookie);
+    await post(api, `/api/portal/giveaways/${GID_A}/register`, bob.cookie);
+    const list = await get(api, '/api/portal/giveaways', bob.cookie);
     expect(list.statusCode).toBe(200);
     expect(list.json()).toEqual([
       { id: GID_A, prize: 'Key', kernelLabel: 'Sofortverlosung', status: 'open', registered: true, inPool: true, weight: 1, chance: 1, winnerStatus: null, updatedAt: expect.any(String) },
     ]);
-    const detail = await get(api, `/portal/giveaways/${GID_A}`, bob.cookie);
+    const detail = await get(api, `/api/portal/giveaways/${GID_A}`, bob.cookie);
     expect(detail.statusCode).toBe(200);
     expect(detail.json()).toMatchObject({
       id: GID_A,
@@ -144,11 +144,11 @@ describe('Portal-API', () => {
     });
     await must(api, api.rt.handlers.close, { giveawayId: GID_A }, alice.actor);
     await must(api, api.rt.handlers.draw, { giveawayId: GID_A }, alice.actor);
-    const won = (await get(api, `/portal/giveaways/${GID_A}`, bob.cookie)).json();
+    const won = (await get(api, `/api/portal/giveaways/${GID_A}`, bob.cookie)).json();
     expect(won.status).toBe('drawn');
     expect(won.lastGateResult).toEqual({ ok: true, reasons: [] });
     expect(won.winner).toEqual({ status: 'pending', claimDeadline: new Date(AT.getTime() + 14 * 86_400_000).toISOString(), contact: 'Discord: alice' });
-    expect((await get(api, '/portal/giveaways', bob.cookie)).json()[0]).toMatchObject({ status: 'drawn', winnerStatus: 'pending' });
+    expect((await get(api, '/api/portal/giveaways', bob.cookie)).json()[0]).toMatchObject({ status: 'drawn', winnerStatus: 'pending' });
   });
 
   it('detail of an open giveaway without participation works, of a closed one → 404', async () => {
@@ -157,13 +157,13 @@ describe('Portal-API', () => {
     const carol = await complete(api, CAROL);
     await openInstant(api, alice, GID_A);
     await openInstant(api, alice, GID_B);
-    const open = await get(api, `/portal/giveaways/${GID_A}`, carol.cookie);
+    const open = await get(api, `/api/portal/giveaways/${GID_A}`, carol.cookie);
     expect(open.statusCode).toBe(200);
     expect(open.json()).toMatchObject({ registered: false, view: { registered: false, inPool: false, weight: 0 }, chance: null });
     await must(api, api.rt.handlers.close, { giveawayId: GID_B }, alice.actor);
-    expect((await get(api, `/portal/giveaways/${GID_B}`, carol.cookie)).statusCode).toBe(404);
-    expect((await get(api, `/portal/giveaways/${UNKNOWN}`, carol.cookie)).statusCode).toBe(404);
-    expect((await get(api, `/portal/giveaways/${GID_A}`)).statusCode).toBe(401);
+    expect((await get(api, `/api/portal/giveaways/${GID_B}`, carol.cookie)).statusCode).toBe(404);
+    expect((await get(api, `/api/portal/giveaways/${UNKNOWN}`, carol.cookie)).statusCode).toBe(404);
+    expect((await get(api, `/api/portal/giveaways/${GID_A}`)).statusCode).toBe(401);
   });
 
   it('GET gates asks the checker for my pid only; checker failure → 502 twitch_unreachable', async () => {
@@ -171,12 +171,12 @@ describe('Portal-API', () => {
     const alice = await complete(api, ALICE);
     const bob = await complete(api, BOB);
     await openInstant(api, alice, GID_A, { gates: [{ id: 'follow', mode: 'all' }] });
-    const ok = await get(api, `/portal/giveaways/${GID_A}/gates`, bob.cookie);
+    const ok = await get(api, `/api/portal/giveaways/${GID_A}/gates`, bob.cookie);
     expect(ok.statusCode).toBe(200);
     expect(ok.json()).toEqual({ ok: true, reasons: [] });
     expect(gates.calls).toEqual([{ pids: [bob.pid] }]);
     gates.fail = true;
-    const down = await get(api, `/portal/giveaways/${GID_A}/gates`, bob.cookie);
+    const down = await get(api, `/api/portal/giveaways/${GID_A}/gates`, bob.cookie);
     expect(down.statusCode).toBe(502);
     expect(down.json()).toEqual({ code: 'twitch_unreachable', message: 'Twitch antwortet nicht. Versuche es gleich noch einmal.' });
   });
@@ -188,11 +188,11 @@ describe('Portal-API', () => {
     const carol = await complete(api, CAROL);
     await openInstant(api, alice, GID_A);
     await must(api, api.rt.handlers.create, { giveawayId: GID_B, teamId: alice.soloTeamId, kernelId: 'instant', settings: { prize: 'Key', channels: [alice.pid] } }, alice.actor);
-    await post(api, `/portal/giveaways/${GID_A}/register`, bob.cookie);
+    await post(api, `/api/portal/giveaways/${GID_A}/register`, bob.cookie);
     await must(api, api.rt.handlers.close, { giveawayId: GID_A }, alice.actor);
-    expect((await get(api, `/portal/giveaways/${GID_A}/gates`, carol.cookie)).statusCode).toBe(404);
-    expect((await get(api, `/portal/giveaways/${GID_B}/gates`, carol.cookie)).statusCode).toBe(404);
-    expect((await get(api, `/portal/giveaways/${GID_A}/gates`, bob.cookie)).statusCode).toBe(200);
+    expect((await get(api, `/api/portal/giveaways/${GID_A}/gates`, carol.cookie)).statusCode).toBe(404);
+    expect((await get(api, `/api/portal/giveaways/${GID_B}/gates`, carol.cookie)).statusCode).toBe(404);
+    expect((await get(api, `/api/portal/giveaways/${GID_A}/gates`, bob.cookie)).statusCode).toBe(200);
     expect(gates.calls).toEqual([{ pids: [bob.pid] }]);
   });
 
@@ -200,10 +200,10 @@ describe('Portal-API', () => {
     const { api } = await setup();
     const alice = await complete(api, ALICE);
     await must(api, api.rt.handlers.create, { giveawayId: GID_B, teamId: alice.soloTeamId, kernelId: 'instant', settings: { prize: 'Key', channels: [alice.pid] } }, alice.actor);
-    expect((await get(api, `/public/giveaways/${GID_B}`)).statusCode).toBe(404);
+    expect((await get(api, `/api/public/giveaways/${GID_B}`)).statusCode).toBe(404);
     await openInstant(api, alice, GID_A);
     await must(api, api.rt.handlers.cancel, { giveawayId: GID_A }, alice.actor);
-    const r = await get(api, `/public/giveaways/${GID_A}`);
+    const r = await get(api, `/api/public/giveaways/${GID_A}`);
     expect(r.statusCode).toBe(200);
     expect(r.json().status).toBe('cancelled');
   });
@@ -215,16 +215,16 @@ describe('Portal-API', () => {
     const carol = await complete(api, CAROL);
     await must(api, api.rt.handlers.create, { giveawayId: GID_A, teamId: alice.soloTeamId, kernelId: 'tickets', settings: { prize: 'Key', channels: [alice.pid], config: { coinBaseSec: 60 } } }, alice.actor);
     await must(api, api.rt.handlers.open, { giveawayId: GID_A }, alice.actor);
-    await post(api, `/portal/giveaways/${GID_A}/register`, bob.cookie);
+    await post(api, `/api/portal/giveaways/${GID_A}/register`, bob.cookie);
     await must(api, api.rt.handlers.correctWatch, { giveawayId: GID_A, channel: alice.pid, pid: bob.pid, sec: 300, reason: 'Test' }, alice.actor);
-    const bought = await post(api, `/portal/giveaways/${GID_A}/kernel-commands`, bob.cookie, { type: 'buy_tickets', args: { count: 2 }, pid: carol.pid });
+    const bought = await post(api, `/api/portal/giveaways/${GID_A}/kernel-commands`, bob.cookie, { type: 'buy_tickets', args: { count: 2 }, pid: carol.pid });
     expect(bought.statusCode).toBe(200);
     expect(types(bought.json())).toEqual([TICKETS_EVENTS.bought]);
     const row = await api.pool.query('SELECT payload FROM events WHERE stream = $1 AND type = $2', [giveawayStream(GID_A), TICKETS_EVENTS.bought]);
     expect(row.rows[0]!.payload).toEqual({ pid: bob.pid, count: 2, coins: 2 });
-    const detail = (await get(api, `/portal/giveaways/${GID_A}`, bob.cookie)).json();
+    const detail = (await get(api, `/api/portal/giveaways/${GID_A}`, bob.cookie)).json();
     expect(detail.view).toMatchObject({ inPool: true, weight: 2, lines: [{ label: 'Zuschauzeit', value: '5 min' }, { label: 'Coins', value: '3' }, { label: 'Tickets', value: '2' }] });
-    const tooMany = await post(api, `/portal/giveaways/${GID_A}/kernel-commands`, bob.cookie, { type: 'buy_tickets', args: { count: 9 } });
+    const tooMany = await post(api, `/api/portal/giveaways/${GID_A}/kernel-commands`, bob.cookie, { type: 'buy_tickets', args: { count: 9 } });
     expect(tooMany.statusCode).toBe(400);
     expect(tooMany.json().code).toBe('not_enough_coins');
   });

@@ -7,7 +7,8 @@ import { UUID_RE } from '../framework/authorize.js';
 import type { CommandHandler } from '../framework/command-bus.js';
 import { GIVEAWAY_NOT_FOUND, loadGiveawayRow } from '../framework/giveaway/authorize.js';
 import type { ChangeSettingsCmd, CreateGiveawayCmd, GiveawayCmd } from '../framework/giveaway/lifecycle.js';
-import { giveawayStream, type GiveawayState, type GiveawayStatus, type WinnerStatus } from '../framework/giveaway/state.js';
+import { GIVEAWAY_EVENTS, giveawayStream, type GiveawayState, type GiveawayStatus, type WinnerStatus } from '../framework/giveaway/state.js';
+import { revertedIds } from '../journal/journal.js';
 import { channelStatusView } from '../ingest/status-view.js';
 import type { ApiDeps } from './auth.js';
 import { bodyOf, executeAs } from './commands.js';
@@ -28,8 +29,43 @@ interface TileRow {
   registered_count: number;
   pool_size: number;
   pool_weight: number;
+  claim_days: number;
   updated_at: Date;
   channels: string[];
+}
+
+const WINNER_STATUSES: readonly WinnerStatus[] = ['pending', 'reported', 'shipped', 'done', 'forfeited'];
+const emptyWinnerStatuses = (): Record<WinnerStatus, number> => ({ pending: 0, reported: 0, shipped: 0, done: 0, forfeited: 0 });
+
+/** Zeitpunkt der gültigen Ziehung je Giveaway: letztes giveaway_drawn, das nicht aufgehoben ist (eine Abfrage für alle Kacheln). */
+async function drawnAtByGiveaway(pool: pg.Pool, ids: string[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  if (ids.length === 0) return out;
+  const r = await pool.query<{ id: string; stream: string; created_at: Date }>(
+    'SELECT id, stream, created_at FROM events WHERE type = $1 AND stream = ANY($2::text[]) ORDER BY stream, seq',
+    [GIVEAWAY_EVENTS.drawn, ids.map(giveawayStream)],
+  );
+  const voided = await revertedIds(pool, r.rows.map((x) => x.id));
+  for (const x of r.rows) {
+    if (!voided.has(x.id)) out.set(x.stream.slice('giveaway:'.length), x.created_at.toISOString());
+  }
+  return out;
+}
+
+async function winnerStatusesByGiveaway(pool: pg.Pool, ids: string[]): Promise<Map<string, Record<WinnerStatus, number>>> {
+  const out = new Map<string, Record<WinnerStatus, number>>();
+  if (ids.length === 0) return out;
+  const r = await pool.query<{ giveaway_id: string; winner_status: WinnerStatus; n: number }>(
+    'SELECT giveaway_id, winner_status, count(*)::int AS n FROM giveaway_participants WHERE giveaway_id = ANY($1::uuid[]) AND winner_status IS NOT NULL GROUP BY giveaway_id, winner_status',
+    [ids],
+  );
+  for (const x of r.rows) {
+    if (!(WINNER_STATUSES as readonly string[]).includes(x.winner_status)) continue;
+    const counts = out.get(x.giveaway_id) ?? emptyWinnerStatuses();
+    counts[x.winner_status] = x.n;
+    out.set(x.giveaway_id, counts);
+  }
+  return out;
 }
 
 export function registerGiveawayRoutes(app: FastifyInstance, deps: ApiDeps, pool: pg.Pool): void {
@@ -64,7 +100,7 @@ export function registerGiveawayRoutes(app: FastifyInstance, deps: ApiDeps, pool
     const pid = req.session!.pid;
     const wanted = (req.query.status ?? '').split(',').map((s) => s.trim()).filter((s): s is GiveawayStatus => (STATUSES as readonly string[]).includes(s));
     const r = await pool.query<TileRow>(
-      `SELECT g.id, g.team_id, g.kernel, g.status, g.prize, g.registered_count, g.pool_size, g.pool_weight, g.updated_at, g.channels
+      `SELECT g.id, g.team_id, g.kernel, g.status, g.prize, g.registered_count, g.pool_size, g.pool_weight, g.claim_days, g.updated_at, g.channels
          FROM giveaways g
         WHERE (g.team_id IN (SELECT solo_team_id FROM accounts WHERE pid = $1 AND NOT deleted) OR g.team_id IN (SELECT team_id FROM team_members WHERE pid = $1))
           AND ($2::text[] IS NULL OR g.status = ANY($2::text[]))
@@ -72,7 +108,9 @@ export function registerGiveawayRoutes(app: FastifyInstance, deps: ApiDeps, pool
       [pid, wanted.length > 0 ? wanted : null],
     );
     const channelPids = [...new Set(r.rows.flatMap((g) => g.channels))];
-    const status = new Map((await channelStatusView(pool, channelPids, now())).map((v) => [v.pid, v]));
+    const ids = r.rows.map((g) => g.id);
+    const [statuses, drawnAt, winnerStatuses] = await Promise.all([channelStatusView(pool, channelPids, now()), drawnAtByGiveaway(pool, ids), winnerStatusesByGiveaway(pool, ids)]);
+    const status = new Map(statuses.map((v) => [v.pid, v]));
     return r.rows.map((g) => ({
       id: g.id,
       teamId: g.team_id,
@@ -83,6 +121,9 @@ export function registerGiveawayRoutes(app: FastifyInstance, deps: ApiDeps, pool
       registeredCount: g.registered_count,
       poolSize: g.pool_size,
       poolWeight: g.pool_weight,
+      claimDays: g.claim_days,
+      drawnAt: drawnAt.get(g.id) ?? null,
+      winnerStatuses: winnerStatuses.get(g.id) ?? emptyWinnerStatuses(),
       updatedAt: g.updated_at.toISOString(),
       warnings: g.channels.flatMap((ch) => {
         const w = status.get(ch)?.warning;

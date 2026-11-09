@@ -30,9 +30,9 @@ async function setup() {
 async function complete(api: ApiSetup, user: TwitchUser) {
   const { cookie } = await login(api, user);
   const h = { cookie, 'content-type': 'application/json' };
-  await api.app.inject({ method: 'POST', url: '/me/terms', headers: h, payload: { version: 1 } });
+  await api.app.inject({ method: 'POST', url: '/api/me/terms', headers: h, payload: { version: 1 } });
   await connect(api, cookie, user);
-  const me = (await api.app.inject({ method: 'GET', url: '/me', headers: { cookie } })).json();
+  const me = (await api.app.inject({ method: 'GET', url: '/api/me', headers: { cookie } })).json();
   return { cookie, h, pid: me.pid as string, soloTeamId: me.soloTeamId as string, actor: `user:${me.pid as string}` };
 }
 
@@ -53,9 +53,9 @@ const get = (api: ApiSetup, url: string, cookie: string) => api.app.inject({ met
 describe('Giveaway-API (Lesen)', () => {
   it('GET /kernels lists instant, watchtime, tickets with schema, gates, services and commands', async () => {
     const api = await setup();
-    expect((await api.app.inject({ method: 'GET', url: '/kernels' })).statusCode).toBe(401);
+    expect((await api.app.inject({ method: 'GET', url: '/api/kernels' })).statusCode).toBe(401);
     const { cookie } = await login(api, ALICE);
-    const r = await get(api, '/kernels', cookie);
+    const r = await get(api, '/api/kernels', cookie);
     expect(r.statusCode).toBe(200);
     const list = r.json() as { id: string; label: string; commands: unknown[]; configSchema: Record<string, unknown>; display: { unit: string | null } }[];
     expect(list.map((k) => k.id)).toEqual(['instant', 'watchtime', 'tickets']);
@@ -72,17 +72,18 @@ describe('Giveaway-API (Lesen)', () => {
     await openGiveaway(api, alice, GID_A, 'Key A');
     await openGiveaway(api, alice, GID_B, 'Key B', false);
     await openGiveaway(api, bob, GID_C, 'Key C');
-    const mine = await get(api, '/giveaways', alice.cookie);
+    const mine = await get(api, '/api/giveaways', alice.cookie);
     expect(mine.statusCode).toBe(200);
     const tiles = mine.json() as Record<string, unknown>[];
     expect(tiles.map((t) => t.id).sort()).toEqual([GID_A, GID_B]);
     const a = tiles.find((t) => t.id === GID_A)!;
     expect(a).toEqual({
       id: GID_A, teamId: alice.soloTeamId, kernel: 'instant', kernelLabel: 'Sofortverlosung', status: 'open', prize: 'Key A',
-      registeredCount: 0, poolSize: 0, poolWeight: 0, updatedAt: expect.any(String), warnings: [],
+      registeredCount: 0, poolSize: 0, poolWeight: 0, claimDays: 14, drawnAt: null,
+      winnerStatuses: { pending: 0, reported: 0, shipped: 0, done: 0, forfeited: 0 }, updatedAt: expect.any(String), warnings: [],
     });
-    expect((await get(api, '/giveaways?status=open', alice.cookie)).json().map((t: { id: string }) => t.id)).toEqual([GID_A]);
-    expect((await get(api, '/giveaways', bob.cookie)).json().map((t: { id: string }) => t.id)).toEqual([GID_C]);
+    expect((await get(api, '/api/giveaways?status=open', alice.cookie)).json().map((t: { id: string }) => t.id)).toEqual([GID_A]);
+    expect((await get(api, '/api/giveaways', bob.cookie)).json().map((t: { id: string }) => t.id)).toEqual([GID_C]);
   });
 
   it('GET /giveaways/:id returns the detail; foreign team → 403 not_your_team; unknown → 404', async () => {
@@ -90,7 +91,7 @@ describe('Giveaway-API (Lesen)', () => {
     const alice = await complete(api, ALICE);
     const bob = await complete(api, BOB);
     await openGiveaway(api, alice, GID_A);
-    const r = await get(api, `/giveaways/${GID_A}`, alice.cookie);
+    const r = await get(api, `/api/giveaways/${GID_A}`, alice.cookie);
     expect(r.statusCode).toBe(200);
     const d = r.json();
     expect(d).toMatchObject({
@@ -108,12 +109,12 @@ describe('Giveaway-API (Lesen)', () => {
     });
     expect(d.legal).toMatchObject({ impressum: { url: 'https://test.example/impressum', hash: 'h:https://test.example/impressum' }, terms: { text: 'Testregeln.' } });
     expect(Object.keys(d.kernel.configSchema)).toEqual(['windowSec']);
-    const foreign = await get(api, `/giveaways/${GID_A}`, bob.cookie);
+    const foreign = await get(api, `/api/giveaways/${GID_A}`, bob.cookie);
     expect(foreign.statusCode).toBe(403);
     expect(foreign.json()).toEqual({ code: 'not_your_team', message: 'Dieses Giveaway gehört nicht zu deinem Team.' });
-    expect((await get(api, `/giveaways/${UNKNOWN}`, alice.cookie)).statusCode).toBe(404);
-    expect((await get(api, '/giveaways/nope', alice.cookie)).statusCode).toBe(404);
-    expect((await api.app.inject({ method: 'GET', url: `/giveaways/${GID_A}` })).statusCode).toBe(401);
+    expect((await get(api, `/api/giveaways/${UNKNOWN}`, alice.cookie)).statusCode).toBe(404);
+    expect((await get(api, '/api/giveaways/nope', alice.cookie)).statusCode).toBe(404);
+    expect((await api.app.inject({ method: 'GET', url: `/api/giveaways/${GID_A}` })).statusCode).toBe(401);
   });
 
   it('a foreign user gets 403 before any replay of the stream; the detail logs view_detail only when it shows winners', async () => {
@@ -122,19 +123,19 @@ describe('Giveaway-API (Lesen)', () => {
     const bob = await complete(api, BOB);
     await openGiveaway(api, alice, GID_A);
     const apply = vi.spyOn(api.rt.reducer, 'apply');
-    expect((await get(api, `/giveaways/${GID_A}`, bob.cookie)).statusCode).toBe(403);
-    expect((await get(api, `/giveaways/${GID_A}/participants`, bob.cookie)).statusCode).toBe(403);
-    expect((await get(api, `/giveaways/${GID_A}/history`, bob.cookie)).statusCode).toBe(403);
+    expect((await get(api, `/api/giveaways/${GID_A}`, bob.cookie)).statusCode).toBe(403);
+    expect((await get(api, `/api/giveaways/${GID_A}/participants`, bob.cookie)).statusCode).toBe(403);
+    expect((await get(api, `/api/giveaways/${GID_A}/history`, bob.cookie)).statusCode).toBe(403);
     expect(apply).not.toHaveBeenCalled();
     apply.mockRestore();
-    expect((await get(api, `/giveaways/${GID_A}`, alice.cookie)).statusCode).toBe(200);
+    expect((await get(api, `/api/giveaways/${GID_A}`, alice.cookie)).statusCode).toBe(200);
     const none = await api.pool.query('SELECT count(*)::int AS n FROM access_log WHERE kind = $1 AND action = $2', ['read', 'view_detail']);
     expect(none.rows[0]!.n).toBe(0);
     await must(api, api.rt.handlers.kernelCommand, { giveawayId: GID_A, command: { type: 'open_window', args: {} } }, alice.actor);
     await must(api, api.rt.handlers.register, { giveawayId: GID_A, pid: bob.pid }, bob.actor);
     await must(api, api.rt.handlers.close, { giveawayId: GID_A }, alice.actor);
     await must(api, api.rt.handlers.draw, { giveawayId: GID_A }, alice.actor);
-    expect((await get(api, `/giveaways/${GID_A}`, alice.cookie)).json().winners).toEqual([{ pid: bob.pid, displayName: 'Bob', status: 'pending' }]);
+    expect((await get(api, `/api/giveaways/${GID_A}`, alice.cookie)).json().winners).toEqual([{ pid: bob.pid, displayName: 'Bob', status: 'pending' }]);
     const logged = await api.pool.query('SELECT actor, action, target FROM access_log WHERE kind = $1 AND action = $2', ['read', 'view_detail']);
     expect(logged.rows).toEqual([{ actor: alice.actor, action: 'view_detail', target: giveawayStream(GID_A) }]);
   });
@@ -148,7 +149,7 @@ describe('Giveaway-API (Lesen)', () => {
     await must(api, api.rt.handlers.kernelCommand, { giveawayId: GID_A, command: { type: 'open_window', args: {} } }, alice.actor);
     await must(api, api.rt.handlers.register, { giveawayId: GID_A, pid: bob.pid }, bob.actor);
     await must(api, api.rt.handlers.register, { giveawayId: GID_A, pid: carol.pid }, carol.actor);
-    const r = await get(api, `/giveaways/${GID_A}/participants`, alice.cookie);
+    const r = await get(api, `/api/giveaways/${GID_A}/participants`, alice.cookie);
     expect(r.statusCode).toBe(200);
     const rows = r.json() as Record<string, unknown>[];
     expect(rows).toHaveLength(2);
@@ -158,7 +159,7 @@ describe('Giveaway-API (Lesen)', () => {
     });
     const reads = await api.pool.query('SELECT actor, action, target FROM access_log WHERE kind = $1 AND action = $2', ['read', 'view_participants']);
     expect(reads.rows).toEqual([{ actor: alice.actor, action: 'view_participants', target: giveawayStream(GID_A) }]);
-    const foreign = await get(api, `/giveaways/${GID_A}/participants`, bob.cookie);
+    const foreign = await get(api, `/api/giveaways/${GID_A}/participants`, bob.cookie);
     expect(foreign.statusCode).toBe(403);
     expect((await api.pool.query('SELECT count(*)::int AS n FROM access_log WHERE kind = $1 AND action = $2', ['read', 'view_participants'])).rows[0]!.n).toBe(1);
   });
@@ -169,7 +170,7 @@ describe('Giveaway-API (Lesen)', () => {
     await openGiveaway(api, alice, GID_A);
     const [opened] = await must(api, api.rt.handlers.kernelCommand, { giveawayId: GID_A, command: { type: 'open_window', args: {} } }, alice.actor);
     await must(api, api.rt.handlers.revert, { stream: giveawayStream(GID_A), eventId: opened!.id, reason: 'Zu früh' }, alice.actor);
-    const page1 = await get(api, `/giveaways/${GID_A}/history?limit=2`, alice.cookie);
+    const page1 = await get(api, `/api/giveaways/${GID_A}/history?limit=2`, alice.cookie);
     expect(page1.statusCode).toBe(200);
     const p1 = page1.json() as { entries: Record<string, unknown>[]; nextBeforeSeq: number | null };
     expect(p1.entries.map((e) => [e.type, e.seq])).toEqual([[INSTANT_EVENTS.windowClosed, 5], [INSTANT_EVENTS.windowOpened, 4]]);
@@ -180,18 +181,18 @@ describe('Giveaway-API (Lesen)', () => {
     });
     expect(p1.entries[1]).toMatchObject({ id: opened!.id, reverted: true, reversal: { kind: 'compensate' }, payload: { until: expect.any(String) } });
     expect(p1.nextBeforeSeq).toBe(4);
-    const page2 = await get(api, `/giveaways/${GID_A}/history?limit=2&beforeSeq=4`, alice.cookie);
+    const page2 = await get(api, `/api/giveaways/${GID_A}/history?limit=2&beforeSeq=4`, alice.cookie);
     const p2 = page2.json() as { entries: Record<string, unknown>[]; nextBeforeSeq: number | null };
     expect(p2.entries.map((e) => [e.type, e.seq])).toEqual([[GIVEAWAY_EVENTS.statusChanged, 3], [GIVEAWAY_EVENTS.legalFrozen, 2]]);
     expect(p2.entries[1]).toMatchObject({ reversal: { kind: 'none', why: 'Eingefrorene Rechtstexte sind ein Nachweis und bleiben.' }, actor: { kind: 'user', pid: alice.pid } });
     expect(p2.nextBeforeSeq).toBe(2);
-    const page3 = await get(api, `/giveaways/${GID_A}/history?limit=2&beforeSeq=2`, alice.cookie);
+    const page3 = await get(api, `/api/giveaways/${GID_A}/history?limit=2&beforeSeq=2`, alice.cookie);
     const p3 = page3.json() as { entries: Record<string, unknown>[]; nextBeforeSeq: number | null };
     expect(p3.entries.map((e) => e.type)).toEqual([GIVEAWAY_EVENTS.created]);
     expect(p3.nextBeforeSeq).toBeNull();
     const reads = await api.pool.query('SELECT count(*)::int AS n FROM access_log WHERE kind = $1 AND action = $2', ['read', 'view_history']);
     expect(reads.rows[0]!.n).toBe(3);
-    expect((await get(api, `/giveaways/${GID_A}/history?limit=0`, alice.cookie)).json().entries).toHaveLength(1);
+    expect((await get(api, `/api/giveaways/${GID_A}/history?limit=0`, alice.cookie)).json().entries).toHaveLength(1);
   });
 });
 
@@ -206,12 +207,12 @@ describe('Giveaway-API (Befehle)', () => {
     const api = await setup();
     const alice = await complete(api, ALICE);
     const bob = await complete(api, BOB);
-    const created = await post(api, '/giveaways', alice.h, { teamId: alice.soloTeamId, kernelId: 'instant', settings: { prize: 'Key', channels: [alice.pid], contact: 'Discord: alice#1' } });
+    const created = await post(api, '/api/giveaways', alice.h, { teamId: alice.soloTeamId, kernelId: 'instant', settings: { prize: 'Key', channels: [alice.pid], contact: 'Discord: alice#1' } });
     expect(created.statusCode).toBe(201);
     const { giveawayId, events } = created.json();
     expect(giveawayId).toMatch(/^[0-9a-f-]{36}$/);
     expect(events).toEqual([{ id: expect.any(String), seq: 1, type: GIVEAWAY_EVENTS.created }]);
-    const g = (u: string) => `/giveaways/${giveawayId}${u}`;
+    const g = (u: string) => `/api/giveaways/${giveawayId}${u}`;
     const settings = await api.app.inject({ method: 'PUT', url: g('/settings'), headers: alice.h, payload: { settings: { prize: 'Besserer Key', config: { windowSec: 300 } } } });
     expect(settings.statusCode).toBe(200);
     expect(types(settings.json())).toEqual([GIVEAWAY_EVENTS.settingsChanged]);
@@ -241,9 +242,9 @@ describe('Giveaway-API (Befehle)', () => {
     const alice = await complete(api, ALICE);
     const bob = await complete(api, BOB);
     const carol = await complete(api, CAROL);
-    const created = await post(api, '/giveaways', alice.h, { teamId: alice.soloTeamId, kernelId: 'watchtime', settings: { prize: 'Key', channels: [alice.pid], config: { coinBaseSec: 60 } } });
+    const created = await post(api, '/api/giveaways', alice.h, { teamId: alice.soloTeamId, kernelId: 'watchtime', settings: { prize: 'Key', channels: [alice.pid], config: { coinBaseSec: 60 } } });
     const { giveawayId } = created.json();
-    const g = (u: string) => `/giveaways/${giveawayId}${u}`;
+    const g = (u: string) => `/api/giveaways/${giveawayId}${u}`;
     await post(api, g('/open'), alice.h);
     // Boost braucht einen aktiven Kanal: setupApi hat keine Aktivität → no_signal als Ablehnung.
     const noSignal = await post(api, g('/boost'), alice.h, { factor: 2, durationSec: 600 });
@@ -281,18 +282,73 @@ describe('Giveaway-API (Befehle)', () => {
     const api = await setup();
     const alice = await complete(api, ALICE);
     const bob = await complete(api, BOB);
-    const { giveawayId } = (await post(api, '/giveaways', alice.h, { teamId: alice.soloTeamId, kernelId: 'instant', settings: { prize: 'Key', channels: [alice.pid] } })).json();
-    const g = (u: string) => `/giveaways/${giveawayId}${u}`;
+    const { giveawayId } = (await post(api, '/api/giveaways', alice.h, { teamId: alice.soloTeamId, kernelId: 'instant', settings: { prize: 'Key', channels: [alice.pid] } })).json();
+    const g = (u: string) => `/api/giveaways/${giveawayId}${u}`;
     for (const url of [g('/open'), g('/pause'), g('/resume'), g('/close'), g('/reopen'), g('/cancel'), g('/complete'), g('/draw')]) {
       const r = await post(api, url, bob.h);
       expect([url, r.statusCode, r.json().code]).toEqual([url, 403, 'not_your_team']);
     }
     expect((await api.app.inject({ method: 'PUT', url: g('/settings'), headers: bob.h, payload: { settings: { prize: 'x' } } })).statusCode).toBe(403);
     expect((await post(api, g('/revert'), bob.h, { eventId: '1', reason: 'x' })).statusCode).toBe(403);
-    expect((await post(api, `/giveaways/${UNKNOWN}/open`, alice.h)).statusCode).toBe(404);
-    expect((await post(api, '/giveaways/nope/open', alice.h)).statusCode).toBe(404);
+    expect((await post(api, `/api/giveaways/${UNKNOWN}/open`, alice.h)).statusCode).toBe(404);
+    expect((await post(api, '/api/giveaways/nope/open', alice.h)).statusCode).toBe(404);
     expect((await api.app.inject({ method: 'POST', url: g('/open') })).statusCode).toBe(401);
-    const foreignTeam = await post(api, '/giveaways', bob.h, { teamId: alice.soloTeamId, kernelId: 'instant', settings: { prize: 'Key', channels: [bob.pid] } });
+    const foreignTeam = await post(api, '/api/giveaways', bob.h, { teamId: alice.soloTeamId, kernelId: 'instant', settings: { prize: 'Key', channels: [bob.pid] } });
     expect(foreignTeam.statusCode).toBe(403);
+  });
+});
+
+describe('Giveaway-API (Erweiterungen für die Oberflächen, Teilprojekt 8b)', () => {
+  it('tiles carry claimDays, drawnAt of the valid draw and winnerStatuses counts', async () => {
+    const api = await setup();
+    const alice = await complete(api, ALICE);
+    const bob = await complete(api, BOB);
+    const carol = await complete(api, CAROL);
+    await openGiveaway(api, alice, GID_A);
+    const before = (await get(api, '/api/giveaways', alice.cookie)).json()[0];
+    expect(before).toMatchObject({ claimDays: 14, drawnAt: null, winnerStatuses: { pending: 0, reported: 0, shipped: 0, done: 0, forfeited: 0 } });
+    await must(api, api.rt.handlers.kernelCommand, { giveawayId: GID_A, command: { type: 'open_window', args: {} } }, alice.actor);
+    await must(api, api.rt.handlers.register, { giveawayId: GID_A, pid: bob.pid }, bob.actor);
+    await must(api, api.rt.handlers.register, { giveawayId: GID_A, pid: carol.pid }, carol.actor);
+    await must(api, api.rt.handlers.close, { giveawayId: GID_A }, alice.actor);
+    await must(api, api.rt.handlers.draw, { giveawayId: GID_A }, alice.actor);
+    const first = (await get(api, '/api/giveaways', alice.cookie)).json()[0];
+    expect(first.drawnAt).toEqual(expect.any(String));
+    expect(first.winnerStatuses).toEqual({ pending: 1, reported: 0, shipped: 0, done: 0, forfeited: 0 });
+    const winner = (await get(api, `/api/giveaways/${GID_A}`, alice.cookie)).json().winners[0].pid as string;
+    await must(api, api.rt.handlers.setWinnerStatus, { giveawayId: GID_A, pid: winner, status: 'reported' }, alice.actor);
+    await must(api, api.rt.handlers.redraw, { giveawayId: GID_A, replace: winner, reason: 'Keine Rückmeldung' }, alice.actor);
+    const second = (await get(api, '/api/giveaways', alice.cookie)).json()[0];
+    const latest = await api.pool.query<{ created_at: Date }>('SELECT created_at FROM events WHERE stream = $1 AND type = $2 ORDER BY seq DESC LIMIT 1', [giveawayStream(GID_A), GIVEAWAY_EVENTS.drawn]);
+    expect(second.drawnAt).toBe(latest.rows[0]!.created_at.toISOString());
+    expect(Date.parse(second.drawnAt)).toBeGreaterThanOrEqual(Date.parse(first.drawnAt));
+    expect(second.winnerStatuses).toEqual({ pending: 1, reported: 0, shipped: 0, done: 0, forfeited: 0 });
+  });
+
+  it('detail carries drawnAt, null before the draw', async () => {
+    const api = await setup();
+    const alice = await complete(api, ALICE);
+    const bob = await complete(api, BOB);
+    await openGiveaway(api, alice, GID_A);
+    expect((await get(api, `/api/giveaways/${GID_A}`, alice.cookie)).json().drawnAt).toBeNull();
+    await must(api, api.rt.handlers.kernelCommand, { giveawayId: GID_A, command: { type: 'open_window', args: {} } }, alice.actor);
+    await must(api, api.rt.handlers.register, { giveawayId: GID_A, pid: bob.pid }, bob.actor);
+    await must(api, api.rt.handlers.close, { giveawayId: GID_A }, alice.actor);
+    const [drawn] = await must(api, api.rt.handlers.draw, { giveawayId: GID_A }, alice.actor);
+    expect((await get(api, `/api/giveaways/${GID_A}`, alice.cookie)).json().drawnAt).toBe(drawn!.createdAt.toISOString());
+  });
+
+  it('history page carries names for pids inside payloads (participant, channel), only for known identities', async () => {
+    const api = await setup();
+    const alice = await complete(api, ALICE);
+    const bob = await complete(api, BOB);
+    await openGiveaway(api, alice, GID_A);
+    await must(api, api.rt.handlers.kernelCommand, { giveawayId: GID_A, command: { type: 'open_window', args: {} } }, alice.actor);
+    await must(api, api.rt.handlers.register, { giveawayId: GID_A, pid: bob.pid }, bob.actor);
+    const page = (await get(api, `/api/giveaways/${GID_A}/history`, alice.cookie)).json() as { entries: { type: string }[]; names: Record<string, string> };
+    expect(page.entries[0]!.type).toBe(GIVEAWAY_EVENTS.registered);
+    expect(page.names).toEqual({ [bob.pid]: 'Bob', [alice.pid]: 'Alice' });
+    const onlyCreated = (await get(api, `/api/giveaways/${GID_A}/history?limit=1&beforeSeq=2`, alice.cookie)).json() as { names: Record<string, string> };
+    expect(onlyCreated.names).toEqual({ [alice.pid]: 'Alice' });
   });
 });

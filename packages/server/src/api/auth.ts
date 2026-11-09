@@ -64,7 +64,8 @@ type CallbackQuery = { code?: string; state?: string; error?: string };
 
 export function registerAuthRoutes(app: FastifyInstance, deps: ApiDeps, pool: pg.Pool): void {
   const now = deps.now ?? (() => new Date());
-  const redirectUri = `${deps.publicUrl}/auth/twitch/callback`;
+  // Die Twitch-App braucht genau diese Redirect-URL (README „Entwickeln“).
+  const redirectUri = `${deps.publicUrl}/api/auth/twitch/callback`;
   const cookie = (name: string, value: string, maxAgeSec: number) => serializeCookie(name, value, { maxAgeSec, secure: deps.secureCookies });
   const clearOauth = cookie(OAUTH_COOKIE, '', 0);
   const sendError = (reply: FastifyReply, h: { status: number; body: unknown }) => reply.code(h.status).send(h.body);

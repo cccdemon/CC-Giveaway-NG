@@ -80,7 +80,7 @@ describe('channel_status', () => {
     s = await setupApi();
     const { cookie } = await login(s);
     await connect(s, cookie);
-    const me = (await s.app.inject({ method: 'GET', url: '/me', headers: { cookie } })).json() as { pid: string };
+    const me = (await s.app.inject({ method: 'GET', url: '/api/me', headers: { cookie } })).json() as { pid: string };
     await upsertChannelStatus(s.pool, me.pid, { live: true, viewers: 100, chatters: 40, lastSignalAt: AT, problem: null }, AT);
     const [view, none] = await channelStatusView(s.pool, [me.pid, PID2], at(10));
     expect(view).toEqual({

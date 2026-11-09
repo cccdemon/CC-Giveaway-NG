@@ -20,13 +20,13 @@ describe('/me', () => {
     s = await setupApi();
     const { cookie } = await login(s);
     const h = { cookie, 'content-type': 'application/json' };
-    expect((await s.app.inject({ method: 'POST', url: '/me/terms', headers: h, payload: { version: 1 } })).statusCode).toBe(204);
-    expect((await s.app.inject({ method: 'PUT', url: '/me/profile', headers: h, payload: { legal: LEGAL } })).statusCode).toBe(204);
+    expect((await s.app.inject({ method: 'POST', url: '/api/me/terms', headers: h, payload: { version: 1 } })).statusCode).toBe(204);
+    expect((await s.app.inject({ method: 'PUT', url: '/api/me/profile', headers: h, payload: { legal: LEGAL } })).statusCode).toBe(204);
     expect((await connect(s, cookie)).statusCode).toBe(302);
-    let me = (await s.app.inject({ method: 'GET', url: '/me', headers: { cookie } })).json();
+    let me = (await s.app.inject({ method: 'GET', url: '/api/me', headers: { cookie } })).json();
     expect(me).toMatchObject({ termsVersion: 1, channelConnected: true, legal: LEGAL });
-    expect((await s.app.inject({ method: 'DELETE', url: '/me/channel', headers: { cookie } })).statusCode).toBe(204);
-    me = (await s.app.inject({ method: 'GET', url: '/me', headers: { cookie } })).json();
+    expect((await s.app.inject({ method: 'DELETE', url: '/api/me/channel', headers: { cookie } })).statusCode).toBe(204);
+    me = (await s.app.inject({ method: 'GET', url: '/api/me', headers: { cookie } })).json();
     expect(me.channelConnected).toBe(false);
     expect(await loadChannelToken(s.pool, me.pid, KEY)).toBeNull();
     const types = (await s.pool.query('SELECT type, actor FROM events ORDER BY id')).rows;
@@ -40,8 +40,8 @@ describe('/me', () => {
   it('GET /me/data exports identity, account state, events and participations and writes a read entry in access_log', async () => {
     s = await setupApi();
     const { cookie } = await login(s);
-    const pid = (await s.app.inject({ method: 'GET', url: '/me', headers: { cookie } })).json().pid as string;
-    await s.app.inject({ method: 'POST', url: '/me/terms', headers: { cookie, 'content-type': 'application/json' }, payload: { version: 1 } });
+    const pid = (await s.app.inject({ method: 'GET', url: '/api/me', headers: { cookie } })).json().pid as string;
+    await s.app.inject({ method: 'POST', url: '/api/me/terms', headers: { cookie, 'content-type': 'application/json' }, payload: { version: 1 } });
     // Teilnahme an einem Giveaway: Anmeldung über den Rahmen (Akteur = die Person selbst).
     const r1 = await s.rt.bus.execute(s.rt.handlers.create, { giveawayId: GID, teamId: TEAM, kernelId: 'instant', settings: { prize: 'Key', channels: [P1] } }, ctx({ actor: 'system:scheduler' }));
     expect(r1.ok).toBe(true);
@@ -49,7 +49,7 @@ describe('/me', () => {
     expect((await s.rt.bus.execute(s.rt.handlers.kernelCommand, { giveawayId: GID, command: { type: 'open_window', args: {} } }, ctx({ actor: 'system:scheduler' }))).ok).toBe(true);
     expect((await s.rt.bus.execute(s.rt.handlers.register, { giveawayId: GID, pid }, ctx({ actor: `user:${pid}` }))).ok).toBe(true);
 
-    const res = await s.app.inject({ method: 'GET', url: '/me/data', headers: { cookie } });
+    const res = await s.app.inject({ method: 'GET', url: '/api/me/data', headers: { cookie } });
     expect(res.statusCode).toBe(200);
     expect(res.headers['content-disposition']).toBe('attachment; filename="meine-daten.json"');
     const body = res.json();
@@ -64,9 +64,9 @@ describe('/me', () => {
   it('DELETE /me removes identity, session and token, journal keeps account_deleted, cookie is cleared', async () => {
     s = await setupApi();
     const { cookie } = await login(s);
-    const pid = (await s.app.inject({ method: 'GET', url: '/me', headers: { cookie } })).json().pid as string;
+    const pid = (await s.app.inject({ method: 'GET', url: '/api/me', headers: { cookie } })).json().pid as string;
     await connect(s, cookie);
-    const del = await s.app.inject({ method: 'DELETE', url: '/me', headers: { cookie } });
+    const del = await s.app.inject({ method: 'DELETE', url: '/api/me', headers: { cookie } });
     expect(del.statusCode).toBe(204);
     expect(String(del.headers['set-cookie'])).toMatch(/ccg_session=;.*Max-Age=0/);
     expect(await findIdentity(s.pool, pid)).toBeNull();
@@ -74,24 +74,24 @@ describe('/me', () => {
     expect((await s.pool.query('SELECT count(*)::int AS n FROM sessions')).rows[0]).toEqual({ n: 0 });
     const last = (await s.pool.query('SELECT type FROM events ORDER BY id DESC LIMIT 1')).rows[0];
     expect(last).toEqual({ type: ACCOUNT_EVENTS.deleted });
-    expect((await s.app.inject({ method: 'GET', url: '/me', headers: { cookie } })).statusCode).toBe(401);
+    expect((await s.app.inject({ method: 'GET', url: '/api/me', headers: { cookie } })).statusCode).toBe(401);
     // Neue Anmeldung desselben Twitch-Kontos ergibt eine neue pid.
     const again = await login(s);
-    expect((await s.app.inject({ method: 'GET', url: '/me', headers: { cookie: again.cookie } })).json().pid).not.toBe(pid);
+    expect((await s.app.inject({ method: 'GET', url: '/api/me', headers: { cookie: again.cookie } })).json().pid).not.toBe(pid);
   });
 
   it('rejections map to status codes: 401 no session, 400 for rejected commands, denied commands land in access_log', async () => {
     s = await setupApi();
-    expect((await s.app.inject({ method: 'POST', url: '/me/terms', payload: { version: 1 } })).statusCode).toBe(401);
-    expect((await s.app.inject({ method: 'GET', url: '/me/data' })).statusCode).toBe(401);
+    expect((await s.app.inject({ method: 'POST', url: '/api/me/terms', payload: { version: 1 } })).statusCode).toBe(401);
+    expect((await s.app.inject({ method: 'GET', url: '/api/me/data' })).statusCode).toBe(401);
     const { cookie } = await login(s);
-    const stale = await s.app.inject({ method: 'POST', url: '/me/terms', headers: { cookie, 'content-type': 'application/json' }, payload: { version: 7 } });
+    const stale = await s.app.inject({ method: 'POST', url: '/api/me/terms', headers: { cookie, 'content-type': 'application/json' }, payload: { version: 7 } });
     expect(stale.statusCode).toBe(400);
     expect(stale.json()).toEqual({ code: 'terms_version_stale', message: 'Die Nutzungsbedingungen haben sich geändert. Lade die Seite neu.' });
-    const bad = await s.app.inject({ method: 'PUT', url: '/me/profile', headers: { cookie, 'content-type': 'application/json' }, payload: { legal: { impressumUrl: 'ftp://x' } } });
+    const bad = await s.app.inject({ method: 'PUT', url: '/api/me/profile', headers: { cookie, 'content-type': 'application/json' }, payload: { legal: { impressumUrl: 'ftp://x' } } });
     expect(bad.statusCode).toBe(400);
     expect(bad.json().code).toBe('invalid_url');
-    const noBody = await s.app.inject({ method: 'PUT', url: '/me/profile', headers: { cookie, 'content-type': 'application/json' }, payload: {} });
+    const noBody = await s.app.inject({ method: 'PUT', url: '/api/me/profile', headers: { cookie, 'content-type': 'application/json' }, payload: {} });
     expect(noBody.statusCode).toBe(400);
     expect(noBody.json().code).toBe('invalid_legal');
     const denied = (await s.pool.query("SELECT action, reason FROM access_log WHERE kind = 'denied' ORDER BY id")).rows;
@@ -100,15 +100,15 @@ describe('/me', () => {
 
   it('GET /me/channel returns connected false without a channel and the status view with one', async () => {
     s = await setupApi();
-    expect((await s.app.inject({ method: 'GET', url: '/me/channel' })).statusCode).toBe(401);
+    expect((await s.app.inject({ method: 'GET', url: '/api/me/channel' })).statusCode).toBe(401);
     const { cookie } = await login(s);
-    let r = await s.app.inject({ method: 'GET', url: '/me/channel', headers: { cookie } });
+    let r = await s.app.inject({ method: 'GET', url: '/api/me/channel', headers: { cookie } });
     expect(r.statusCode).toBe(200);
     expect(r.json()).toMatchObject({ connected: false, tokenStatus: 'none', live: false, warning: null });
     await connect(s, cookie);
     const pid = r.json().pid as string;
     await upsertChannelStatus(s.pool, pid, { live: true, viewers: 10, chatters: 8, lastSignalAt: s.clock.now }, s.clock.now);
-    r = await s.app.inject({ method: 'GET', url: '/me/channel', headers: { cookie } });
+    r = await s.app.inject({ method: 'GET', url: '/api/me/channel', headers: { cookie } });
     expect(r.json()).toMatchObject({ pid, connected: true, tokenStatus: 'ok', live: true, viewers: 10, chatters: 8, coverage: 0.8, warning: null });
   });
 });

@@ -97,13 +97,13 @@ export function cookieHeader(cookies: Record<string, string>): string {
 /** Spielt login → callback durch und liefert das Sitzungs-Cookie plus den Rücksprung. */
 export async function login(s: ApiSetup, user: TwitchUser = ALICE, ret = '/'): Promise<{ cookie: string; location: string }> {
   s.twitch.user = user;
-  const start = await s.app.inject({ method: 'GET', url: `/auth/twitch/login?return=${encodeURIComponent(ret)}` });
+  const start = await s.app.inject({ method: 'GET', url: `/api/auth/twitch/login?return=${encodeURIComponent(ret)}` });
   if (start.statusCode !== 302) throw new Error(`login: ${start.statusCode} ${start.body}`);
   const state = new URL(start.headers.location as string).searchParams.get('state')!;
   const oauth = cookiesOf(start);
   const cb = await s.app.inject({
     method: 'GET',
-    url: `/auth/twitch/callback?code=code-${user.login}&state=${state}`,
+    url: `/api/auth/twitch/callback?code=code-${user.login}&state=${state}`,
     headers: { cookie: cookieHeader({ ccg_oauth: oauth.ccg_oauth! }) },
   });
   if (cb.statusCode !== 302) throw new Error(`callback: ${cb.statusCode} ${cb.body}`);
@@ -115,13 +115,13 @@ export async function login(s: ApiSetup, user: TwitchUser = ALICE, ret = '/'): P
 /** Spielt connect → callback mit bestehender Sitzung durch. */
 export async function connect(s: ApiSetup, cookie: string, user: TwitchUser = ALICE) {
   s.twitch.user = user;
-  const start = await s.app.inject({ method: 'GET', url: '/auth/twitch/connect', headers: { cookie } });
+  const start = await s.app.inject({ method: 'GET', url: '/api/auth/twitch/connect', headers: { cookie } });
   if (start.statusCode !== 302) return start;
   const state = new URL(start.headers.location as string).searchParams.get('state')!;
   const oauth = cookiesOf(start);
   return s.app.inject({
     method: 'GET',
-    url: `/auth/twitch/callback?code=connect-${user.login}&state=${state}`,
+    url: `/api/auth/twitch/callback?code=connect-${user.login}&state=${state}`,
     headers: { cookie: `${cookie}; ccg_oauth=${oauth.ccg_oauth}` },
   });
 }
