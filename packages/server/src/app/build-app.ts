@@ -7,7 +7,7 @@ import { registerMeRoutes } from '../api/me.js';
 import { registerGiveawayRoutes } from '../api/giveaways.js';
 import { registerPortalRoutes } from '../api/portal.js';
 import { registerTeamRoutes } from '../api/teams.js';
-import { registerNoPush, registerWsRoutes } from '../api/ws.js';
+import { WS_MAX_PAYLOAD, registerNoPush, registerWsRoutes } from '../api/ws.js';
 
 export type { ApiDeps } from '../api/auth.js';
 
@@ -42,7 +42,8 @@ export function buildApp(deps: AppDeps, opts: { logger?: FastifyServerOptions['l
       const api = deps.api;
       // Das WebSocket-Plugin braucht einen eigenen Kontext: die Route darf erst nach dem Plugin entstehen.
       void app.register(async (inst) => {
-        await inst.register(websocket);
+        // Protokollnachrichten sind klein. Ohne Grenze nähme ws 100 MiB an.
+        await inst.register(websocket, { options: { maxPayload: WS_MAX_PAYLOAD } });
         registerWsRoutes(inst, api, deps.pool);
       });
     } else {

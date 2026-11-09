@@ -17,6 +17,8 @@ declare module 'fastify' {
 }
 
 export const WS_PING_MS = 30_000;
+/** Größte Client-Nachricht. Abos sind wenige hundert Byte. */
+export const WS_MAX_PAYLOAD = 16 * 1024;
 export const WS_CLOSE_NO_SESSION = 4401;
 export const WS_CLOSE_SERVICE_RESTART = 1012;
 
@@ -72,8 +74,7 @@ export function registerWsRoutes(app: FastifyInstance, deps: ApiDeps, pool: pg.P
     }, WS_PING_MS);
     ping.unref?.();
 
-    socket.on('message', (raw) => {
-      void (async () => {
+    const handle = async (raw: unknown): Promise<void> => {
         const session = await sessionReady;
         if (!session) return;
         let m: unknown;
@@ -100,6 +101,12 @@ export function registerWsRoutes(app: FastifyInstance, deps: ApiDeps, pool: pg.P
               send(notAllowed(stream as string));
               continue;
             }
+            // Während der Prüfung kann die Verbindung zugegangen sein: dann keinen Listener mehr anlegen (sonst Leck).
+            if (socket.readyState !== socket.OPEN) return;
+            if (subs.has(stream as string)) {
+              ok.push(stream as string);
+              continue;
+            }
             subs.set(stream as string, subscriber.subscribe(stream as string, onEvents(stream as string)));
             ok.push(stream as string);
           }
@@ -116,7 +123,11 @@ export function registerWsRoutes(app: FastifyInstance, deps: ApiDeps, pool: pg.P
           }
           if (gone.length > 0) send({ unsubscribed: gone });
         }
-      })();
+    };
+    // Nachrichten je Verbindung nacheinander: zwei schnelle Abos desselben Stroms dürfen nur einen Listener anlegen.
+    let chain: Promise<void> = Promise.resolve();
+    socket.on('message', (raw) => {
+      chain = chain.then(() => handle(raw)).catch(() => undefined);
     });
 
     socket.on('close', () => {

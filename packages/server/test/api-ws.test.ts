@@ -139,6 +139,29 @@ describe('WebSocket /ws', () => {
     expect(await b.silence()).toBe(true);
   });
 
+  it('a message above 16 KiB closes the socket (1009); two quick subscribes to one stream deliver each event once', async () => {
+    s = await setupApi();
+    const api = s;
+    const alice = await complete(api, ALICE);
+    await must(api, api.rt.handlers.create, { giveawayId: GID_A, teamId: alice.soloTeamId, kernelId: 'instant', settings: { prize: 'Key', channels: [alice.pid] } }, alice.actor);
+    const url = await listen(api);
+    const big = open(url, alice.cookie);
+    await big.ready;
+    big.ws.send('x'.repeat(20_000));
+    expect((await big.closed).code).toBe(1009);
+
+    const c = open(url, alice.cookie);
+    await c.ready;
+    c.send({ subscribe: [giveawayStream(GID_A)] });
+    c.send({ subscribe: [giveawayStream(GID_A)] });
+    expect(await c.next()).toEqual({ subscribed: [giveawayStream(GID_A)] });
+    expect(await c.next()).toEqual({ subscribed: [giveawayStream(GID_A)] });
+    await must(api, api.rt.handlers.open, { giveawayId: GID_A }, alice.actor);
+    expect(await c.next()).toMatchObject({ event: { type: GIVEAWAY_EVENTS.legalFrozen } });
+    expect(await c.next()).toMatchObject({ event: { type: GIVEAWAY_EVENTS.statusChanged } });
+    expect(await c.silence()).toBe(true);
+  });
+
   it('closing a socket drops its subscriptions; other sockets keep receiving', async () => {
     s = await setupApi();
     const api = s;
