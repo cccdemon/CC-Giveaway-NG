@@ -4,6 +4,8 @@ import { ACCOUNT_EVENTS } from '../src/identity/account/state.js';
 import { findIdentity } from '../src/identity/identities.js';
 import { INACTIVE_DAYS, purgeInactiveAccounts } from '../src/identity/inactivity.js';
 import { attachAccounts } from '../src/identity/runtime.js';
+import { allAdmins } from '../src/platform/admin.js';
+import { attachPlatform } from '../src/platform/runtime.js';
 import { AT } from './helpers/db.js';
 import { ctx } from './helpers/fixtures.js';
 import { setupGiveaway } from './helpers/giveaway.js';
@@ -52,6 +54,21 @@ describe('purgeInactiveAccounts', () => {
     const TEAM = '55555555-5555-4555-8555-555555555555';
     expect((await s.rt.bus.execute(s.rt.teams.create, { teamId: TEAM, name: 'Werwölfe' }, ctx({ actor: `user:${FRESH}` }))).ok).toBe(true);
     expect((await s.rt.bus.execute(s.rt.teams.ban, { teamId: TEAM, pid: OLD }, ctx({ actor: `user:${FRESH}` }))).ok).toBe(true);
+    const r = await purgeInactiveAccounts(s.pool, s.rt, accounts, day(INACTIVE_DAYS + 1));
+    expect(r).toEqual({ deleted: [FRESH], failed: 0 });
+    expect(await findIdentity(s.pool, OLD)).not.toBeNull();
+  });
+
+  it('keeps an identity with a platform ban, even when unseen for 365 days', async () => {
+    const s = await setupGiveaway();
+    close = s.close;
+    const accounts = attachAccounts(s.rt, { tokenKey: randomBytes(32) });
+    const platform = attachPlatform(s.rt, { admins: allAdmins });
+    const signIn = (pid: string, id: string) =>
+      s.rt.bus.execute(accounts.signIn, { pid, soloTeamId: pid, user: { id, login: `u${id}`, displayName: `U${id}` } }, ctx({ actor: 'system:twitch', now: AT }));
+    expect((await signIn(OLD, '1')).ok).toBe(true);
+    expect((await signIn(FRESH, '2')).ok).toBe(true);
+    expect((await s.rt.bus.execute(platform.ban, { pid: OLD, reason: 'Bot-Verhalten' }, ctx({ actor: `user:${FRESH}` }))).ok).toBe(true);
     const r = await purgeInactiveAccounts(s.pool, s.rt, accounts, day(INACTIVE_DAYS + 1));
     expect(r).toEqual({ deleted: [FRESH], failed: 0 });
     expect(await findIdentity(s.pool, OLD)).not.toBeNull();

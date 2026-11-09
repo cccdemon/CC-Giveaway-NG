@@ -1,4 +1,6 @@
 // Browser-Fehler an den Server melden (NEW_DESIGN.md 11.4, 12.4): ohne Personenbezug, ohne Cookie, höchstens zehn je Seite.
+import type { HandleClientError } from '@sveltejs/kit/hooks';
+import { S } from './texts/sentences.js';
 
 export const MAX_REPORTS_PER_PAGE = 10;
 
@@ -25,5 +27,18 @@ export function createErrorReporter(fetchFn: typeof fetch): ErrorReporter {
     } catch {
       // Der Bericht ist Beiwerk. Ein Fehler beim Melden bleibt still.
     }
+  };
+}
+
+/**
+ * handleError für hooks.client.ts: nur unbekannte Fehler (echte Ausnahmen) gehen an den Betreiber.
+ * Erwartete Fehler (error(403, …)) und 404 des Rahmens behalten ihre Meldung und sind kein Browser-Fehler.
+ */
+export function makeHandleError(report: ErrorReporter): HandleClientError {
+  return (input) => {
+    // Erwartete Fehler und 404 behalten die Behandlung von SvelteKit (ihre Meldung bleibt).
+    if (input.kind !== 'unknown') return undefined;
+    void report(input.error, input.event.url.href);
+    return { message: S.serverError };
   };
 }

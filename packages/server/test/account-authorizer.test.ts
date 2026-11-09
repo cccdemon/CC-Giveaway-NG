@@ -171,6 +171,8 @@ describe('Plattform-Sperre und Fassungen der Nutzungsbedingungen (Teilprojekt 8c
     const c = await pool.connect();
     try {
       expect(await accountTeamAuthorizer().canFound(c, me)).toMatchObject({ code: 'account_banned' });
+      // Auch Team-Verwaltung (einladen, sperren, umbenennen) bleibt einer gesperrten Person verwehrt.
+      expect(await accountTeamAuthorizer().isMember(c, me, SOLO)).toMatchObject({ code: 'account_banned' });
     } finally {
       c.release();
     }

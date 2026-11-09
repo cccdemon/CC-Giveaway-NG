@@ -72,6 +72,8 @@ export function accountTeamAuthorizer(): TeamAuthorizer {
       if (actor.startsWith('system:')) return null;
       const account = await accountOf(c, actor);
       if (!account) return NO_ACCOUNT();
+      // Eine Plattform-Sperre nimmt alle Streamer-Rechte, auch die Team-Verwaltung (11.4).
+      if (account.row.ban_reason !== null) return BANNED(account.row.ban_reason);
       return (await isMemberRow(c, account.pid, teamId)) ? null : NOT_MEMBER();
     },
   };

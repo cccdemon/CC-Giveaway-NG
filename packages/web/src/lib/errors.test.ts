@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { MAX_REPORTS_PER_PAGE, createErrorReporter } from './errors.js';
+import { MAX_REPORTS_PER_PAGE, createErrorReporter, makeHandleError } from './errors.js';
 
 describe('Browser-Fehlerbericht', () => {
   it('posts message, stack and url to /api/errors without credentials and stops after the limit', async () => {
@@ -30,5 +30,17 @@ describe('Browser-Fehlerbericht', () => {
       throw new TypeError('offline');
     }) as unknown as typeof fetch);
     await expect(report(new Error('x'), 'https://g.example/')).resolves.toBeUndefined();
+  });
+
+  it('handleError reports only unknown errors, not expected app errors or framework 404s, and answers with a German message', async () => {
+    const report = vi.fn(async () => undefined);
+    const handle = makeHandleError(report);
+    const event = { url: new URL('https://g.example/admin') } as never;
+    const result = await handle({ error: new Error('kaputt'), event, status: 500, message: 'Internal Error', kind: 'unknown' } as never);
+    expect(result).toEqual({ message: expect.any(String) });
+    expect(report).toHaveBeenCalledTimes(1);
+    await handle({ error: { status: 403, message: 'Nur Betreiber' }, event, status: 403, message: 'Nur Betreiber', kind: 'app' } as never);
+    await handle({ error: { status: 404, message: 'Not Found' }, event, status: 404, message: 'Not Found', kind: 'framework' } as never);
+    expect(report).toHaveBeenCalledTimes(1);
   });
 });

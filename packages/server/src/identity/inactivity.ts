@@ -8,8 +8,8 @@ export const INACTIVE_DAYS = 365;
 
 /**
  * Löscht jedes Konto, dessen last_seen_at älter als INACTIVE_DAYS ist, als Befehl mit Akteur system:scheduler.
- * In einem Team Gesperrte bleiben: Ihre Signale werden verworfen, darum altert last_seen_at, und ohne Zuordnung käme die
- * Person mit neuer pid zurück (NEW_DESIGN.md 15.3). Eine Ablehnung oder ein Fehler zählt als failed, der Lauf geht weiter.
+ * In einem Team oder auf der Plattform Gesperrte bleiben: Ihre Signale werden verworfen, darum altert last_seen_at, und ohne
+ * Zuordnung käme die Person mit neuer pid zurück (NEW_DESIGN.md 15.3, 11.4). Eine Ablehnung oder ein Fehler zählt als failed, der Lauf geht weiter.
  */
 export async function purgeInactiveAccounts(
   pool: pg.Pool,
@@ -19,7 +19,10 @@ export async function purgeInactiveAccounts(
 ): Promise<{ deleted: string[]; failed: number }> {
   const cutoff = new Date(now.getTime() - INACTIVE_DAYS * 86_400_000);
   const r = await pool.query<{ pid: string }>(
-    'SELECT pid FROM identities i WHERE last_seen_at < $1 AND NOT EXISTS (SELECT 1 FROM team_bans b WHERE b.pid = i.pid) ORDER BY last_seen_at',
+    `SELECT pid FROM identities i WHERE last_seen_at < $1
+        AND NOT EXISTS (SELECT 1 FROM team_bans b WHERE b.pid = i.pid)
+        AND NOT EXISTS (SELECT 1 FROM platform_bans p WHERE p.pid = i.pid)
+      ORDER BY last_seen_at`,
     [cutoff],
   );
   const deleted: string[] = [];

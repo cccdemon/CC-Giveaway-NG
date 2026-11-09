@@ -5,7 +5,7 @@ import type { TwitchUser } from '../src/identity/identities.js';
 import { pgBanDirectory, pgTeamDirectory } from '../src/identity/team-directory.js';
 import { upsertChannelStatus } from '../src/ingest/channel-status.js';
 import { twitchIdAdmins } from '../src/platform/admin.js';
-import { BROWSER_ERROR_RETENTION_DAYS, purgeBrowserErrors, recordBrowserError } from '../src/platform/ops.js';
+import { BROWSER_ERROR_MAX_ROWS, BROWSER_ERROR_RETENTION_DAYS, purgeBrowserErrors, recordBrowserError } from '../src/platform/ops.js';
 import { AT } from './helpers/db.js';
 import { ctx } from './helpers/fixtures.js';
 import { ALICE, BOB, connect, login, setupApi, type ApiSetup } from './helpers/api.js';
@@ -184,5 +184,12 @@ describe('Verwaltung (NEW_DESIGN.md 11.4)', () => {
     expect(blocked.json()).toMatchObject({ code: 'terms_required' });
     expect((await api.app.inject({ method: 'POST', url: '/api/me/terms', headers: bob.h, payload: { version: 2 } })).statusCode).toBe(204);
     expect((await get(api, '/api/me', bob.cookie)).json()).toMatchObject({ termsVersion: 2, currentTermsVersion: 2 });
+  });
+
+  it('browser errors are capped: the newest rows stay, older ones fall off at the cap', async () => {
+    const api = await setup();
+    expect(BROWSER_ERROR_MAX_ROWS).toBeGreaterThanOrEqual(1000);
+    for (let i = 1; i <= 4; i++) await recordBrowserError(api.pool, { message: `f${i}` }, new Date(AT.getTime() + i * 1000), 2);
+    expect((await api.pool.query('SELECT message FROM browser_errors ORDER BY id')).rows.map((r) => r.message)).toEqual(['f3', 'f4']);
   });
 });

@@ -6,6 +6,8 @@ import { channelStatusView, type ChannelStatusView } from '../ingest/status-view
 import { reject, type Rejection } from '../shared/rejection.js';
 
 export const BROWSER_ERROR_RETENTION_DAYS = 30;
+/** Obergrenze der Tabelle: die Route ist ohne Sitzung erreichbar, mehr Zeilen hält niemand aus (Caddy begrenzt die Rate in Teilprojekt 10). */
+export const BROWSER_ERROR_MAX_ROWS = 10_000;
 export const BROWSER_ERROR_LIMITS = { message: 500, stack: 4000, url: 500, userAgent: 300 } as const;
 export const FEEDBACK_MAX = 2000;
 export const DENIED_WINDOW_HOURS = 24;
@@ -19,8 +21,8 @@ export interface BrowserErrorInput {
   userAgent?: string;
 }
 
-/** Speichert einen Browser-Fehler. Kein pid, keine IP, kein Cookie: nur Text, Ort und Browser. */
-export async function recordBrowserError(db: Queryable, e: BrowserErrorInput, at: Date): Promise<void> {
+/** Speichert einen Browser-Fehler. Kein pid, keine IP, kein Cookie: nur Text, Ort und Browser. Über maxRows fallen die ältesten weg. */
+export async function recordBrowserError(db: Queryable, e: BrowserErrorInput, at: Date, maxRows: number = BROWSER_ERROR_MAX_ROWS): Promise<void> {
   await db.query('INSERT INTO browser_errors (at, message, stack, url, user_agent) VALUES ($1, $2, $3, $4, $5)', [
     at,
     cut(e.message, BROWSER_ERROR_LIMITS.message) ?? '',
@@ -28,6 +30,7 @@ export async function recordBrowserError(db: Queryable, e: BrowserErrorInput, at
     cut(e.url, BROWSER_ERROR_LIMITS.url),
     cut(e.userAgent, BROWSER_ERROR_LIMITS.userAgent),
   ]);
+  await db.query('DELETE FROM browser_errors WHERE id NOT IN (SELECT id FROM browser_errors ORDER BY id DESC LIMIT $1)', [maxRows]);
 }
 
 export async function listBrowserErrors(db: Queryable, limit = 50): Promise<{ at: string; message: string; url: string | null }[]> {
