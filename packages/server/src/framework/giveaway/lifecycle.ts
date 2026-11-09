@@ -252,8 +252,9 @@ export function changeSettingsHandler(d: GiveawayDeps): CommandHandler<ChangeSet
         chatBonus: s.chatBonus === undefined ? before.chatBonus : ({ ...before.chatBonus, ...(s.chatBonus as Partial<ChatBonusSettings>) } as ChatBonusSettings),
       });
       if (isRejection(after)) return after;
-      // Nur neu gesetzte Kanäle müssen zum Team gehören. Kanäle ausgetretener Mitglieder bleiben als Nachweis (Teilprojekt 7, Festlegung 5).
-      if (s.channels !== undefined && outsideTeam(after.channels, team)) return CHANNEL_NOT_IN_TEAM();
+      // Nur neu hinzukommende Kanäle müssen zum Team gehören. Eine unveränderte Liste geht durch, auch nach einem Austritt
+      // (volles Formular), der Kanal eines Ausgetretenen kommt aber nicht erneut hinein (Teilprojekt 7, Festlegung 5).
+      if (s.channels !== undefined && outsideTeam(after.channels.filter((ch) => !before.channels.includes(ch)), team)) return CHANNEL_NOT_IN_TEAM();
       if (canonicalJson(after) === canonicalJson(before)) return [];
       // Der eingefrorene Nachweis (9.4) darf nicht still von den sichtbaren Texten abweichen.
       if (state.status !== 'draft' && canonicalJson(after.legal) !== canonicalJson(before.legal)) {

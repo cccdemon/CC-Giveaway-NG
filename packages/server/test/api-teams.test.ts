@@ -49,6 +49,9 @@ describe('/teams', () => {
     const team = await api.app.inject({ method: 'GET', url: `/teams/${teamId}`, headers: { cookie: alice.cookie } });
     expect(team.statusCode).toBe(200);
     expect(team.json()).toEqual({ teamId, name: 'Werwölfe', active: true, members: [{ pid: alice.pid, displayName: 'Alice' }], invites: [], banned: [] });
+    // Anzeigenamen Dritter sind personenbezogen: der Lesezugriff steht im Zugriffslog (NEW_DESIGN.md 5.5).
+    const reads = await api.pool.query('SELECT actor, action, target FROM access_log WHERE kind = $1 ORDER BY id', ['read']);
+    expect(reads.rows).toEqual([{ actor: `user:${alice.pid}`, action: 'view_team', target: `team:${teamId}` }]);
   });
 
   it('invite link: POST invites returns url and expiresAt, GET join shows name and validity, BOB joins via POST', async () => {

@@ -5,7 +5,8 @@ import type pg from 'pg';
 import { UUID_RE } from '../framework/authorize.js';
 import type { CommandHandler } from '../framework/command-bus.js';
 import { TEAM_NOT_FOUND } from '../framework/team/commands.js';
-import { INVITE_TTL_DAYS, type TeamState } from '../framework/team/state.js';
+import { INVITE_TTL_DAYS, teamStream, type TeamState } from '../framework/team/state.js';
+import { logRead } from '../audit/access-log.js';
 import { displayNameOf, findIdentity } from '../identity/identities.js';
 import { reject } from '../shared/rejection.js';
 import type { ApiDeps } from './auth.js';
@@ -63,6 +64,8 @@ export function registerTeamRoutes(app: FastifyInstance, deps: ApiDeps, pool: pg
     const member = await pool.query('SELECT 1 FROM team_members WHERE team_id = $1 AND pid = $2', [teamId, req.session!.pid]);
     if ((member.rowCount ?? 0) === 0) return send(reply, NOT_MEMBER);
     const at = now();
+    // Anzeigenamen anderer Personen sind personenbezogen: Lesezugriff ins Zugriffslog (NEW_DESIGN.md 5.5).
+    await logRead(pool, { actor: `user:${req.session!.pid}`, action: 'view_team', target: teamStream(teamId), ip: req.ip, at });
     const c = await pool.connect();
     try {
       const members = await c.query<{ pid: string }>('SELECT pid FROM team_members WHERE team_id = $1 ORDER BY since, pid', [teamId]);

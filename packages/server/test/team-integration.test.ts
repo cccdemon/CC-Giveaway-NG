@@ -72,10 +72,25 @@ describe('Teams im Giveaway', () => {
     await teamWithP1(rt);
     await must(rt, rt.handlers.create, createCmd([FOUNDER, P1]));
     await must(rt, rt.teams.leave, { teamId: TEAM, pid: P1 }, { actor: userOf(P1) });
-    expect(await run(rt, rt.handlers.changeSettings, { giveawayId: GID, settings: { channels: [FOUNDER, P1] } })).toEqual({ ok: false, rejection: CHANNEL_NOT_IN_TEAM });
-    expect(await code(run(rt, rt.handlers.changeSettings, { giveawayId: GID, settings: { prize: 'Neu' } }))).toBe('ok');
+    // Unveränderte Liste (volles Formular) geht durch, nur neu gesetzte Kanäle müssen zum Team gehören.
+    expect(await code(run(rt, rt.handlers.changeSettings, { giveawayId: GID, settings: { channels: [FOUNDER, P1], prize: 'Neu' } }))).toBe('ok');
+    expect(await code(run(rt, rt.handlers.changeSettings, { giveawayId: GID, settings: { prize: 'Neu 2' } }))).toBe('ok');
     expect(await code(run(rt, rt.handlers.changeSettings, { giveawayId: GID, settings: { channels: [FOUNDER] } }))).toBe('ok');
     expect((await state(rt)).settings.channels).toEqual([FOUNDER]);
+    expect(await run(rt, rt.handlers.changeSettings, { giveawayId: GID, settings: { channels: [FOUNDER, P1] } })).toEqual({ ok: false, rejection: CHANNEL_NOT_IN_TEAM });
+  });
+
+  it('signals for the channel of a member who left are rejected, the remaining channel still credits', async () => {
+    const { pool, rt } = await setup();
+    await teamWithP1(rt);
+    await withTx(pool, (c) => upsertIdentity(c, ALICE, P2, AT));
+    await createOpen(rt, createCmd([FOUNDER, P1], { kernelId: 'watchtime', settings: { prize: 'Key', channels: [FOUNDER, P1], config: { coinBaseSec: 60 }, counting: 'first_seen' } }));
+    const presence = (channel: string, minute: Date) => ({ giveawayId: GID, channel, minute: minuteOf(minute), presence: [ALICE], chat: [], follows: [] });
+    expect(await code(run(rt, rt.handlers.applySignals, presence(P1, AT), INGEST))).toBe('ok');
+    await must(rt, rt.teams.leave, { teamId: TEAM, pid: P1 }, { actor: userOf(P1) });
+    expect(await run(rt, rt.handlers.applySignals, presence(P1, at(60)), INGEST)).toEqual({ ok: false, rejection: CHANNEL_NOT_IN_TEAM });
+    expect(await code(run(rt, rt.handlers.applySignals, presence(FOUNDER, at(60)), INGEST))).toBe('ok');
+    expect((await state(rt)).watchMinutes[P1]).toBe(minuteOf(AT));
   });
 
   it('create_giveaway in a deactivated team is team_inactive; pause, close and draw of the running giveaway still work', async () => {

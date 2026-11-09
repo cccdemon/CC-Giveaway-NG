@@ -60,6 +60,8 @@ export interface ResolvedSignals {
   live: boolean;
   /** Im Team gesperrte pids, aus allen Signalen entfernt (NEW_DESIGN.md 15.3). */
   banned: Pid[];
+  /** Der Kanal gehört noch zum Team (Mitglied). Ohne Verzeichnis immer true. */
+  inTeam: boolean;
 }
 
 export type ApplySignalsDeps = GiveawayDeps & { identities: IdentityResolver; activity: ChannelActivity };
@@ -241,9 +243,12 @@ export function applySignalsHandler(d: ApplySignalsDeps): CommandHandler<ApplySi
       const map = await d.identities.resolve(c, ids);
       const live = (await d.activity.active(c, [cmd.channel], ctx.now)).has(cmd.channel);
       const banned = state.exists ? await d.bans.bannedOf(c, state.teamId) : new Set<Pid>();
+      // Der Kanal eines ausgetretenen Mitglieds sammelt nicht weiter für das Team (9.3, Festlegung 5).
+      const team = state.exists ? await d.teams.channelsOf(c, state.teamId) : null;
+      const inTeam = team === null || team.channels.has(cmd.channel);
       let created = 0;
       // Eine Identität bekommt nur, wer in diesem Befehl eine Anmeldung oder Gutschrift bekäme (6.1: „Für andere entsteht keine pid“).
-      if (state.exists && state.status === 'open' && state.settings.channels.includes(cmd.channel)) {
+      if (state.exists && state.status === 'open' && inTeam && state.settings.channels.includes(cmd.channel)) {
         const unknown = users.filter((u) => !map.has(u.id));
         const trial = new Map([...map, ...unknown.map((u): [string, Pid] => [u.id, `${UNKNOWN_PREFIX}${u.id}`])]);
         const planned = pidsIn(planSignals(state, d.kernels.get(state.kernelId), cmd.channel, cmd.minute, resolveWith(cmd, trial, banned), live));
@@ -256,12 +261,13 @@ export function applySignalsHandler(d: ApplySignalsDeps): CommandHandler<ApplySi
       }
       const resolved = resolveWith(cmd, map, banned);
       await d.identities.touch(c, resolved.presence ?? [], ctx.now);
-      return { ...resolved, unknown: ids.filter((id) => !map.has(id)).length, created, live, banned: [...banned].sort() };
+      return { ...resolved, unknown: ids.filter((id) => !map.has(id)).length, created, live, banned: [...banned].sort(), inTeam };
     },
     decide(state, cmd, _ctx, p) {
       if (!state.exists) return GIVEAWAY_NOT_FOUND();
       if (state.status !== 'open') return NOT_OPEN();
       if (!state.settings.channels.includes(cmd.channel)) return reject('channel_not_in_giveaway', 'Dieser Kanal gehört nicht zum Giveaway.');
+      if (!p.inTeam) return reject('channel_not_in_team', 'Dieser Kanal gehört nicht zum Team.');
       return planSignals(state, d.kernels.get(state.kernelId), cmd.channel, cmd.minute, p, p.live);
     },
   };
