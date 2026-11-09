@@ -4,8 +4,8 @@ import type pg from 'pg';
 import { vi } from 'vitest';
 import { buildApp } from '../../src/app/build-app.js';
 import { allowAll } from '../../src/framework/giveaway/authorize.js';
-import { InMemoryPublisher } from '../../src/framework/publisher.js';
 import { createRuntime, type Runtime, type RuntimeOptions } from '../../src/framework/runtime.js';
+import { LocalBus } from '../../src/framework/subscriber.js';
 import type { TwitchUser } from '../../src/identity/identities.js';
 import { attachAccounts, type AccountHandlers } from '../../src/identity/runtime.js';
 import { REQUIRED_CHANNEL_SCOPES, TwitchError, type TwitchAuthClient } from '../../src/identity/twitch.js';
@@ -60,13 +60,15 @@ export interface ApiSetup {
 
 export async function setupApi(over: Partial<Omit<RuntimeOptions, 'pool' | 'publisher' | 'log'>> = {}): Promise<ApiSetup> {
   const db = await freshDb();
-  const rt = createRuntime({ pool: db.pool, publisher: new InMemoryPublisher(), auth: allowAll, log: { error: vi.fn() }, legalSource: fullLegalSource, fetcher: fakeFetcher, ...over });
+  // Ein Bus für Schreiben und Live-Push: so kommen Ereignisse eines Befehls im Test bei /ws an.
+  const bus = new LocalBus();
+  const rt = createRuntime({ pool: db.pool, publisher: bus, auth: allowAll, log: { error: vi.fn() }, legalSource: fullLegalSource, fetcher: fakeFetcher, ...over });
   const accounts = attachAccounts(rt, { tokenKey: KEY });
   const twitch = stubTwitch();
   const clock = { now: AT };
   const app = buildApp({
     pool: db.pool,
-    api: { rt, accounts, auth: over.auth ?? allowAll, ...(over.gates ? { gates: over.gates } : {}), twitch: twitch.client, publicUrl: PUBLIC_URL, secureCookies: true, now: () => clock.now },
+    api: { rt, accounts, auth: over.auth ?? allowAll, ...(over.gates ? { gates: over.gates } : {}), subscriber: bus, twitch: twitch.client, publicUrl: PUBLIC_URL, secureCookies: true, now: () => clock.now },
   });
   return {
     pool: db.pool, app, rt, accounts, twitch, clock,

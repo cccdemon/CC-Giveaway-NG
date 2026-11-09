@@ -5,6 +5,8 @@ import { createPool } from '../db/pool.js';
 import { reconcileKernelVersions } from '../framework/giveaway/projectors.js';
 import { RedisPublisher } from '../framework/publisher.js';
 import { createRuntime } from '../framework/runtime.js';
+import { RedisSubscriber } from '../framework/subscriber.js';
+import { closeAllSockets } from '../api/ws.js';
 import { accountAuthorizer, accountTeamAuthorizer } from '../identity/account/authorizer.js';
 import { pgBanDirectory, pgTeamDirectory } from '../identity/team-directory.js';
 import { accountLegalSource } from '../identity/account/legal-source.js';
@@ -45,11 +47,19 @@ async function main() {
     teamAuth: accountTeamAuthorizer(), teamDirectory: pgTeamDirectory(), bans: pgBanDirectory(),
   });
   const accounts = attachAccounts(rt, { tokenKey });
+  // Live-Push: eigene Redis-Verbindung im Abo-Modus (NEW_DESIGN.md 3.2).
+  const subscriber = new RedisSubscriber(new Redis(config.redisUrl));
+  await subscriber.start();
   const app = buildApp(
-    { pool, api: { rt, accounts, auth: accountAuthorizer(), gates, twitch, publicUrl: config.publicUrl, secureCookies: config.nodeEnv === 'production' } },
+    { pool, api: { rt, accounts, auth: accountAuthorizer(), gates, subscriber, twitch, publicUrl: config.publicUrl, secureCookies: config.nodeEnv === 'production' } },
     { logger: { level: config.logLevel } },
   );
+  subscriber.onError((err) => {
+    const n = closeAllSockets(app);
+    app.log.error({ err, closed: n }, 'Redis Pub/Sub meldet einen Fehler. Die Live-Verbindungen sind geschlossen, die Oberflächen verbinden neu.');
+  });
   app.addHook('onClose', async () => {
+    await subscriber.stop();
     await redis.quit();
   });
   const { rebuilt, skipped } = await reconcileKernelVersions(pool, rt);

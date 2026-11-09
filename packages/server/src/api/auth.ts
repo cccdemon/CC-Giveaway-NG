@@ -4,6 +4,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type pg from 'pg';
 import type { GiveawayAuthorizer } from '../framework/giveaway/authorize.js';
 import type { GateChecker } from '../framework/giveaway/gates.js';
+import type { Subscriber } from '../framework/subscriber.js';
 import type { Runtime } from '../framework/runtime.js';
 import { findPidByTwitchId } from '../identity/identities.js';
 import type { AccountHandlers } from '../identity/runtime.js';
@@ -20,6 +21,8 @@ export interface ApiDeps {
   auth: GiveawayAuthorizer;
   /** Bedingungsprüfung auf Anfrage im Portal (NEW_DESIGN.md 6.5). Ohne Prüfer antwortet die Route mit no_checker. */
   gates?: GateChecker;
+  /** Quelle der Live-Ereignisse für /ws. Ohne sie antwortet /ws mit 503. */
+  subscriber?: Subscriber;
   twitch: TwitchAuthClient;
   /** Öffentliche Basis-URL ohne Schrägstrich am Ende. */
   publicUrl: string;

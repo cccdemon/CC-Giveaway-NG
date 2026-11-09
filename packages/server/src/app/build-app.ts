@@ -1,10 +1,13 @@
+import websocket from '@fastify/websocket';
 import Fastify, { type FastifyInstance, type FastifyServerOptions } from 'fastify';
 import type pg from 'pg';
+import type { WebSocket } from 'ws';
 import { registerAuthRoutes, type ApiDeps } from '../api/auth.js';
 import { registerMeRoutes } from '../api/me.js';
 import { registerGiveawayRoutes } from '../api/giveaways.js';
 import { registerPortalRoutes } from '../api/portal.js';
 import { registerTeamRoutes } from '../api/teams.js';
+import { registerNoPush, registerWsRoutes } from '../api/ws.js';
 
 export type { ApiDeps } from '../api/auth.js';
 
@@ -34,6 +37,17 @@ export function buildApp(deps: AppDeps, opts: { logger?: FastifyServerOptions['l
     registerTeamRoutes(app, deps.api, deps.pool);
     registerGiveawayRoutes(app, deps.api, deps.pool);
     registerPortalRoutes(app, deps.api, deps.pool);
+    app.decorate('wsSockets', new Set<WebSocket>());
+    if (deps.api.subscriber) {
+      const api = deps.api;
+      // Das WebSocket-Plugin braucht einen eigenen Kontext: die Route darf erst nach dem Plugin entstehen.
+      void app.register(async (inst) => {
+        await inst.register(websocket);
+        registerWsRoutes(inst, api, deps.pool);
+      });
+    } else {
+      registerNoPush(app);
+    }
   }
   return app;
 }
