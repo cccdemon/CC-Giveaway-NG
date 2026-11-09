@@ -24,7 +24,11 @@
   const loginHref = $derived(`/api/auth/twitch/login?return=${encodeURIComponent(returnTo(page.url))}`);
   const THEMES: Theme[] = ['system', 'dark', 'light'];
 
-  onMount(() => theme.subscribe((t) => applyTheme(t)));
+  onMount(() => {
+    // Marker für E2E-Tests: erst nach der Hydration reagieren Knöpfe.
+    document.body.dataset.hydrated = '1';
+    return theme.subscribe((t) => applyTheme(t));
+  });
 
   async function logout() {
     stopLive();
