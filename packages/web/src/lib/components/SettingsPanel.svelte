@@ -1,13 +1,16 @@
 <script lang="ts">
-  // Einstellungen ändern (NEW_DESIGN.md 7.1: in Entwurf, Offen, Pausiert). Sendet nur die Rahmen-Felder, Kern-Regeln und Bedingungen folgen in Task 5.
-  import type { GiveawaySettings } from '../api/types.js';
+  // Einstellungen ändern (NEW_DESIGN.md 7.1: in Entwurf, Offen, Pausiert): Rahmen-Felder, Kern-Regeln, Bedingungen, Kanäle.
+  import type { GiveawaySettings, KernelInfo } from '../api/types.js';
   import { L } from '../texts/labels.js';
   import { S } from '../texts/sentences.js';
   import Button from './Button.svelte';
+  import ConfigForm from './ConfigForm.svelte';
   import Field from './Field.svelte';
+  import GatesForm from './GatesForm.svelte';
 
   interface Props {
     settings: GiveawaySettings;
+    kernel: KernelInfo;
     channelOptions: { pid: string; displayName: string }[];
     busy: boolean;
     error: string | null;
@@ -15,7 +18,7 @@
     oncancel: () => void;
   }
 
-  let { settings, channelOptions, busy, error, onsave, oncancel }: Props = $props();
+  let { settings, kernel, channelOptions, busy, error, onsave, oncancel }: Props = $props();
   const id = $props.id();
   // svelte-ignore state_referenced_locally
   const start = settings;
@@ -32,6 +35,9 @@
   let chatMinWords = $state(start.chatBonus.minWords);
   let chatCooldown = $state(start.chatBonus.cooldownSec);
   let channels = $state<string[]>([...start.channels]);
+  let config = $state<Record<string, unknown>>({ ...start.config });
+  let gates = $state([...start.gates]);
+  const chosen = $derived(channelOptions.filter((c) => channels.includes(c.pid)));
 
   const clean = (s: string): string | null => (s.trim() === '' ? null : s.trim());
 
@@ -48,6 +54,8 @@
       purgeDays: Math.round(purgeDays),
       chatBonus: { enabled: chatEnabled, sec: Math.round(chatSec), minWords: Math.round(chatMinWords), cooldownSec: Math.round(chatCooldown) },
       channels,
+      config,
+      gates,
     });
   }
 </script>
@@ -62,7 +70,7 @@
       <Field label={L.fields.keyword} for="{id}-keyword"><input id="{id}-keyword" type="text" bind:value={keyword} maxlength="32" placeholder="!keyword" /></Field>
       <Field label={L.fields.contact} for="{id}-contact"><input id="{id}-contact" type="text" bind:value={contact} maxlength="200" /></Field>
       <Field label={L.fields.winnersCount} for="{id}-winners"><input id="{id}-winners" type="number" min="1" max="100" bind:value={winnersCount} required /></Field>
-      <Field label={L.fields.claimDays} for="{id}-claim"><input id="{id}-claim" type="number" min="1" max="365" bind:value={claimDays} required /></Field>
+      <Field label={L.fields.claimDays} for="{id}-claim"><input id="{id}-claim" type="number" min="1" max="90" bind:value={claimDays} required /></Field>
     </div>
     <fieldset class="group">
       <legend class="lbl">{L.fields.counting}</legend>
@@ -82,6 +90,16 @@
           <Field label={L.fields.chatCooldown} for="{id}-ccool"><input id="{id}-ccool" type="number" min="0" max="3600" bind:value={chatCooldown} /></Field>
         </div>
       {/if}
+    </fieldset>
+    <fieldset class="group">
+      <legend class="lbl">{L.fields.config}</legend>
+      <ConfigForm schema={kernel.configSchema} value={config} onchange={(c) => (config = c)} />
+    </fieldset>
+    <fieldset class="group">
+      <legend class="lbl">{L.fields.gates}</legend>
+      {#key channels.join(',')}
+        <GatesForm supported={kernel.supportedGates} channels={chosen} value={gates} onchange={(g) => (gates = g)} />
+      {/key}
     </fieldset>
     <fieldset class="group">
       <legend class="lbl">{L.fields.channels}</legend>

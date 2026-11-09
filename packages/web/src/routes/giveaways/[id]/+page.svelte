@@ -115,7 +115,7 @@
   <CorrectionForm channels={detail.channels} rows={data.participants} busy={panelCmd.busy} error={panelCmd.error} onsubmit={correct} oncancel={() => (panel = null)} />
 {:else if panel === 'settings'}
   {#key detail.settings}
-    <SettingsPanel settings={detail.settings} channelOptions={data.channelOptions} busy={panelCmd.busy} error={panelCmd.error} onsave={saveSettings} oncancel={() => (panel = null)} />
+    <SettingsPanel settings={detail.settings} kernel={detail.kernel} channelOptions={data.channelOptions} busy={panelCmd.busy} error={panelCmd.error} onsave={saveSettings} oncancel={() => (panel = null)} />
   {/key}
 {/if}
 
