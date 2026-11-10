@@ -85,6 +85,22 @@ describe('helixClient', () => {
     expect(calls[0]!.headers.authorization).toBe('Bearer app-1');
   });
 
+  it('getUsersByLogin sends login query parameters in blocks of 100', async () => {
+    const { helix, calls } = client((c, n) => json(200, n === 1 ? fixture('get-users') : { data: [] }));
+    const logins = Array.from({ length: 150 }, (_, i) => `user_${i}`);
+    expect(await helix.getUsersByLogin(logins)).toEqual([
+      { id: '12345', login: 'alice', displayName: 'Alice', createdAt: '2020-05-01T10:00:00Z' },
+      { id: '67890', login: 'bob', displayName: 'Bob', createdAt: '2026-10-10T00:00:00Z' },
+    ]);
+    expect(calls).toHaveLength(2);
+    expect(new URL(calls[0]!.url).pathname).toBe('/helix/users');
+    expect(new URL(calls[0]!.url).searchParams.getAll('login')).toHaveLength(100);
+    expect(new URL(calls[0]!.url).searchParams.getAll('id')).toHaveLength(0);
+    expect(new URL(calls[1]!.url).searchParams.getAll('login')).toHaveLength(50);
+    expect(await helix.getUsersByLogin([])).toEqual([]);
+    expect(calls).toHaveLength(2);
+  });
+
   it('getUsers maps id, login, display_name, created_at in blocks of 100', async () => {
     const { helix, calls } = client((c, n) => json(200, n === 1 ? fixture('get-users') : { data: [] }));
     const ids = Array.from({ length: 150 }, (_, i) => String(1000 + i));

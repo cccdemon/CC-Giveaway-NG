@@ -1,0 +1,77 @@
+{
+  "format": "cc-giveaway-backup",
+  "version": 2,
+  "exportedAt": "2026-11-20T18:00:00.000Z",
+  "exportedBy": "streamer_a",
+  "teamId": "team_chaoscrew",
+  "channels": ["streamer_a", "kanal_b"],
+  "config": { "keyword": "!werwolf", "followMin": 2, "coinBaseSec": 7200, "chat": { "enabled": true, "bonusSec": 2, "minWords": 4, "cooldown": 10 }, "autoPause": false, "autoResume": false },
+  "state": { "open": true, "paused": false, "sessionId": "sess_1700000001" },
+  "participants": [],
+  "team": {
+    "id": "team_chaoscrew",
+    "name": "Chaos Crew",
+    "members": [
+      { "login": "streamer_a", "twitchId": "1001", "channel": "streamer_a" },
+      { "login": "streamer_b", "twitchId": null, "channel": "kanal_b" }
+    ],
+    "banned": ["troll_t"]
+  },
+  "instances": [
+    {
+      "sessionId": "sess_1700000001",
+      "name": "Werwolf",
+      "keyword": "!werwolf",
+      "channels": ["streamer_a", "kanal_b", "kanal_c"],
+      "open": true,
+      "paused": false,
+      "cfg": { "coin_base_sec": 7200, "follow_min": 2, "chat_enabled": true, "chat_bonus_sec": 2, "chat_min_words": 4, "chat_cooldown": 10 },
+      "prize": "Werwolf-Box",
+      "sponsor": "Sponsor GmbH",
+      "termsVersion": 3,
+      "termsText": "Teilnahmebedingungen Fassung 3. Teilnahme ab 18 Jahren.",
+      "participants": [
+        { "login": "viewer_1", "registered": true, "perChannel": { "streamer_a": { "watchSec": 36000.4 }, "kanal_b": { "watchSec": 7200 } } },
+        { "login": "Viewer_2", "registered": true, "perChannel": { "streamer_a": { "watchSec": 1800.6 } } },
+        { "login": "viewer_3", "registered": false, "perChannel": { "kanal_c": { "watchSec": 600 } } },
+        { "login": "ghost_9", "registered": true, "perChannel": { "streamer_a": { "watchSec": 120 } } },
+        { "login": "viewer_4", "registered": true, "perChannel": {} },
+        { "login": "troll_t", "registered": false, "perChannel": { "streamer_a": { "watchSec": 300 } } },
+        { "login": "nobody_0", "registered": false, "perChannel": {} }
+      ],
+      "pgWatchSum": { "streamer_a": 38221, "kanal_b": 7200, "kanal_c": 600 }
+    },
+    {
+      "sessionId": "sess_1700000002",
+      "name": "Test geschlossen",
+      "keyword": "!test",
+      "channels": ["streamer_a"],
+      "open": false,
+      "paused": false,
+      "cfg": { "coin_base_sec": 30, "follow_min": 5, "chat_enabled": false, "chat_bonus_sec": 2, "chat_min_words": 4, "chat_cooldown": 10 },
+      "prize": null,
+      "sponsor": null,
+      "termsVersion": 0,
+      "termsText": null,
+      "participants": [
+        { "login": "viewer_1", "registered": true, "perChannel": { "streamer_a": { "watchSec": 90 } } }
+      ],
+      "pgWatchSum": { "streamer_a": 90 }
+    },
+    {
+      "sessionId": "sess_1700000003",
+      "name": "Test pausiert",
+      "keyword": "zu lang um ein keyword zu sein und mit leerzeichen",
+      "channels": ["streamer_a"],
+      "open": true,
+      "paused": true,
+      "cfg": { "coin_base_sec": 7200, "follow_min": 0, "chat_enabled": true, "chat_bonus_sec": 2, "chat_min_words": 4, "chat_cooldown": 10 },
+      "prize": "Nichts",
+      "sponsor": null,
+      "termsVersion": 3,
+      "termsText": "Teilnahmebedingungen Fassung 3. Teilnahme ab 18 Jahren.",
+      "participants": [],
+      "pgWatchSum": {}
+    }
+  ]
+}
