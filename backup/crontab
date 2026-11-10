@@ -1,0 +1,3 @@
+# Backup täglich 03:00, Restore-Probe am 1. jedes Monats 04:00 (NEW_DESIGN.md 12.3). Läuft in busybox crond im Dienst backup.
+0 3 * * * sh /backup/backup.sh >> /backups/backup.log 2>&1
+0 4 1 * * sh /backup/restore-check.sh >> /backups/restore-check.log 2>&1
