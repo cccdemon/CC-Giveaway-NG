@@ -79,7 +79,7 @@ export function registerGiveawayEvents(registry: EventTypeRegistry, kernels: Ker
       channel: z.uuid(),
       triggerEventId: z.string().min(1),
       ok: z.boolean(),
-      error: z.string().max(200).optional(),
+      error: z.string().regex(/^[a-z_]{1,40}$/).optional(),
       messageId: z.string().max(200).optional(),
     }),
     reversal: { kind: 'none', why: ANNOUNCEMENT_SENT_WHY },

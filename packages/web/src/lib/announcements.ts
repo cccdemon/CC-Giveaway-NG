@@ -20,6 +20,11 @@ export function kindLabel(kind: string): string {
   return (L.announcements.kinds as Record<string, string>)[kind] ?? kind;
 }
 
+/** Fehlercode einer Ansage in Worten; unbekannte Codes bleiben stehen. */
+export function errorLabel(code: string): string {
+  return (L.announcements.errors as Record<string, string>)[code] ?? code;
+}
+
 /** Fehler je Art (leer = in Ordnung). Ohne Katalog bleibt die Platzhalter-Prüfung aus, Link und Länge gelten immer. */
 export function validateAnnouncements(a: AnnouncementSettings, kinds: AnnouncementKind[], kernelId: string | null): Record<string, string> {
   const e: Record<string, string> = {};

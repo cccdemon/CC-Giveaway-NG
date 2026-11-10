@@ -107,7 +107,7 @@ describe('Announcer', () => {
   it('a failing or throwing sendChat records announcement_sent with ok false and the reason; the run continues', async () => {
     const s = await setup({
       reply: (channel) => {
-        if (channel.pid === P1) return { ok: false, reason: 'rate_limited' };
+        if (channel.pid === P1) return { ok: false, reason: 'helix_ratelimited' };
         throw new Error('boom');
       },
     });
@@ -115,10 +115,11 @@ describe('Announcer', () => {
     const opened = await must(s.rt, s.rt.handlers.open, { giveawayId: GID });
     expect(await s.announcer.handle(giveawayStream(GID), opened)).toEqual({ sent: 0, failed: 2, skipped: 0 });
     expect(await s.recorded()).toMatchObject([
-      { kind: 'opened', channel: P1, ok: false, error: 'rate_limited' },
+      { kind: 'opened', channel: P1, ok: false, error: 'helix_ratelimited' },
       { kind: 'opened', channel: P2, ok: false, error: 'send_failed' },
     ]);
-    expect(s.log.error).toHaveBeenCalledTimes(1);
+    // Einmal für den werfenden Adapter, einmal für die abgelehnte Nachricht mit Code.
+    expect(s.log.error).toHaveBeenCalledTimes(2);
   });
 
   it('instant window_opened uses the kernel default with {bis} in Berlin time; unknown event types produce nothing', async () => {

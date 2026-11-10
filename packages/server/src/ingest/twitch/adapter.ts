@@ -187,7 +187,7 @@ export function twitchAdapter(o: TwitchAdapterOptions): TwitchAdapter {
         return await o.helix.sendChatMessage(channel.twitchId, o.botUserId, text);
       } catch (err) {
         o.log.error({ err, channel: channel.pid }, 'Die Chat-Nachricht ließ sich nicht senden.');
-        return { ok: false, reason: err instanceof HelixError ? err.message : String(err) };
+        return { ok: false, reason: err instanceof HelixError ? err.code : 'send_failed', detail: err instanceof Error ? err.message : String(err) };
       }
     },
 

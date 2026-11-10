@@ -9,6 +9,9 @@ import { GIVEAWAY_NOT_FOUND } from './authorize.js';
 import { ANNOUNCEMENT_SENT } from './announcements.js';
 import { giveawayStream, type GiveawayState } from './state.js';
 
+/** Fehlercodes wie SEND_ERROR_CODES im Ingest: nur Kleinbuchstaben und Unterstrich, kein Freitext im Journal. */
+const ERROR_CODE_RE = /^[a-z_]{1,40}$/;
+
 export interface RecordAnnouncementCmd {
   giveawayId: string;
   kind: string;
@@ -32,6 +35,7 @@ export function recordAnnouncementHandler(d: GiveawayDeps): CommandHandler<Recor
       if (typeof cmd.channel !== 'string' || !UUID_RE.test(cmd.channel)) return reject('invalid_channel', 'Ein Kanal ist keine gültige ID.');
       if (typeof cmd.triggerEventId !== 'string' || cmd.triggerEventId === '') return reject('invalid_announcement', 'Das auslösende Ereignis fehlt.');
       if (typeof cmd.ok !== 'boolean') return reject('invalid_announcement', 'Das Ergebnis der Ansage fehlt.');
+      if (cmd.error !== undefined && !ERROR_CODE_RE.test(cmd.error)) return reject('invalid_announcement', 'Der Fehler einer Ansage ist ein Code, kein Text.');
       return [
         {
           type: ANNOUNCEMENT_SENT,
@@ -40,7 +44,7 @@ export function recordAnnouncementHandler(d: GiveawayDeps): CommandHandler<Recor
             channel: cmd.channel,
             triggerEventId: cmd.triggerEventId,
             ok: cmd.ok,
-            ...(typeof cmd.error === 'string' && cmd.error !== '' ? { error: cmd.error.slice(0, 200) } : {}),
+            ...(typeof cmd.error === 'string' && cmd.error !== '' ? { error: cmd.error } : {}),
             ...(typeof cmd.messageId === 'string' && cmd.messageId !== '' ? { messageId: cmd.messageId.slice(0, 200) } : {}),
           },
         },

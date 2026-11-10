@@ -274,6 +274,15 @@ export const L = {
     off: 'Ansagen stumm',
     withLink: 'mit Link',
     withoutLink: 'ohne Link',
+    errors: {
+      helix_unauthorized: 'Bot-Token ungültig',
+      helix_forbidden: 'Bot darf hier nicht schreiben',
+      helix_ratelimited: 'Twitch bremst den Bot',
+      helix_unreachable: 'Twitch nicht erreichbar',
+      helix_error: 'Twitch-Fehler',
+      dropped: 'Twitch hat die Nachricht verworfen',
+      send_failed: 'Senden fehlgeschlagen',
+    },
     kinds: {
       opened: 'Geöffnet',
       paused: 'Pausiert',

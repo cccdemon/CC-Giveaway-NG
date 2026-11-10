@@ -91,6 +91,6 @@ describe('KernelRegistry', () => {
 
   it('defaultKernels versionStamp', () => {
     expect(defaultKernels().versionStamp()).toBe(versionStamp(FRAMEWORK_REDUCER_VERSION, [instantKernel, watchtimeKernel, ticketsKernel]));
-    expect(FRAMEWORK_REDUCER_VERSION).toBe(5);
+    expect(FRAMEWORK_REDUCER_VERSION).toBe(6);
   });
 });

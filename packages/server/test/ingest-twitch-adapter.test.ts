@@ -213,7 +213,9 @@ describe('twitchAdapter', () => {
     expect(await s.adapter.sendChat(FULL, 'Gewinner: Alice')).toEqual({ ok: true, messageId: 'msg-1' });
     expect(s.helix.sendChatMessage).toHaveBeenCalledWith('1001', BOT, 'Gewinner: Alice');
     s.helix.sendChatMessage.mockRejectedValueOnce(new HelixError('helix_forbidden', 403, null));
-    expect(await s.adapter.sendChat(FULL, 'x')).toMatchObject({ ok: false });
+    expect(await s.adapter.sendChat(FULL, 'x')).toEqual({ ok: false, reason: 'helix_forbidden', detail: 'Twitch Helix: helix_forbidden (403)' });
+    s.helix.sendChatMessage.mockRejectedValueOnce(new Error('kaputt'));
+    expect(await s.adapter.sendChat(FULL, 'x')).toEqual({ ok: false, reason: 'send_failed', detail: 'kaputt' });
     expect(await s.adapter.checkFollows(FULL, [ALICE.id, '42'])).toEqual([
       { userId: ALICE.id, follows: true, since: '2026-01-01T00:00:00.000Z' },
       { userId: '42', follows: false, since: null },

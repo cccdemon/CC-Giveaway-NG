@@ -1,5 +1,5 @@
 // Verlaufseinträge als deutsche Sätze (NEW_DESIGN.md 5.3, 11.1). Teilnehmer-Namen maskiert der Streamermodus, Kanalnamen nicht.
-import { kindLabel } from './announcements.js';
+import { errorLabel, kindLabel } from './announcements.js';
 import type { HistoryEntry } from './api/types.js';
 import { dateTime, duration, number } from './format.js';
 import { maskName } from './mask.js';
@@ -85,7 +85,7 @@ export function historyText(e: HistoryEntry, names: Names, mask: boolean): strin
       return h.ticketsRefunded(participant(str(p.pid)), number(num(p.count)), number(num(p.coins)));
     case 'announcement_sent': {
       const kind = kindLabel(str(p.kind));
-      return p.ok === false ? h.announcementFailed(kind, channel(str(p.channel)), str(p.error) || '–') : h.announced(kind, channel(str(p.channel)));
+      return p.ok === false ? h.announcementFailed(kind, channel(str(p.channel)), errorLabel(str(p.error) || '–')) : h.announced(kind, channel(str(p.channel)));
     }
     default: {
       const keys = Object.keys(p);

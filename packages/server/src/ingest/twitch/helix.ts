@@ -232,8 +232,9 @@ export function helixClient(o: HelixOptions): HelixClient {
       const r = await call({ method: 'POST', path: '/chat/messages', body: { broadcaster_id: broadcasterId, sender_id: senderId, message: text } });
       const first = data(r.body)[0];
       if (first?.is_sent === true && typeof first.message_id === 'string') return { ok: true, messageId: first.message_id };
-      const reason = (first?.drop_reason as { message?: unknown } | null)?.message;
-      return { ok: false, reason: typeof reason === 'string' ? reason : 'Twitch hat die Nachricht nicht gesendet.' };
+      const drop = (first?.drop_reason ?? {}) as { code?: unknown; message?: unknown };
+      const detail = [drop.code, drop.message].filter((x): x is string => typeof x === 'string').join(': ');
+      return { ok: false, reason: 'dropped', ...(detail === '' ? {} : { detail }) };
     },
 
     async listConduits() {

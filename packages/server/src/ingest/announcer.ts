@@ -7,7 +7,7 @@ import { planAnnouncement, type AnnouncementSettings } from '../framework/giveaw
 import type { Runtime } from '../framework/runtime.js';
 import type { Subscriber } from '../framework/subscriber.js';
 import type { EventRecord, StreamId } from '../journal/types.js';
-import type { ChannelRef, IngestAdapter, SendResult } from './signals.js';
+import type { ChannelRef, IngestAdapter, SendErrorCode, SendResult } from './signals.js';
 
 export interface AnnouncerOptions {
   pool: pg.Pool;
@@ -26,7 +26,7 @@ export interface AnnounceResult {
 }
 
 /** Fehlercode im Nachweis, wenn der Adapter wirft statt ein Ergebnis zu liefern. */
-export const SEND_FAILED = 'send_failed';
+export const SEND_FAILED: SendErrorCode = 'send_failed';
 /** Gemerkte Sendungen je Ereignis und Kanal, damit ein doppelt zugestelltes Bündel nicht doppelt sendet (Festlegung 4). */
 export const SEEN_MAX = 5_000;
 
@@ -96,7 +96,10 @@ export class Announcer {
         this.remember(key);
         const sent = await this.send(channel, plan.text, giveawayId);
         if (sent.ok) result.sent++;
-        else result.failed++;
+        else {
+          result.failed++;
+          if (sent.reason !== SEND_FAILED) this.o.log.error({ giveawayId, channel: channel.pid, kind: plan.kind, code: sent.reason, detail: sent.detail }, 'Twitch hat eine Ansage nicht gesendet. Der Nachweis trägt den Code.');
+        }
         await this.record(giveawayId, plan.kind, channel.pid, event.id, sent);
       }
     }

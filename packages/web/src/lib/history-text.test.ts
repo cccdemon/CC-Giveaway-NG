@@ -48,7 +48,8 @@ describe('historyText', () => {
 
   it('announcement_sent renders sent and failed announcements with kind label and channel name', () => {
     expect(historyText(entry('announcement_sent', { kind: 'opened', channel: CHANNEL, triggerEventId: '1', ok: true, messageId: 'm' }), names, true)).toBe('Ansage „Geöffnet“ bei kanal_nord gesendet.');
-    expect(historyText(entry('announcement_sent', { kind: 'winner', channel: CHANNEL, triggerEventId: '1', ok: false, error: 'rate_limited' }), names, false)).toBe('Ansage „Gewinner“ bei kanal_nord fehlgeschlagen: rate_limited.');
+    expect(historyText(entry('announcement_sent', { kind: 'winner', channel: CHANNEL, triggerEventId: '1', ok: false, error: 'helix_ratelimited' }), names, false)).toBe('Ansage „Gewinner“ bei kanal_nord fehlgeschlagen: Twitch bremst den Bot.');
+    expect(historyText(entry('announcement_sent', { kind: 'winner', channel: CHANNEL, triggerEventId: '1', ok: false, error: 'odd_code' }), names, false)).toBe('Ansage „Gewinner“ bei kanal_nord fehlgeschlagen: odd_code.');
   });
 
   it('falls back to type and payload keys for unknown types', () => {

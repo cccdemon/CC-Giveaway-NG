@@ -4,7 +4,7 @@ import { instantKernel } from '../kernels/instant/index.js';
 import { ticketsKernel } from '../kernels/tickets/index.js';
 import { watchtimeKernel } from '../kernels/watchtime/index.js';
 
-export const FRAMEWORK_REDUCER_VERSION = 5; // 2: DrawRecord.excluded, 3: registered[pid].eventId, 4: legal, legalEventId, 5: Dienste (seen, boost, …)
+export const FRAMEWORK_REDUCER_VERSION = 6; // 2: DrawRecord.excluded, 3: registered[pid].eventId, 4: legal, legalEventId, 5: Dienste (seen, boost, …), 6: settings.announcements
 
 /** FNV-1a 32 Bit über `${frameworkVersion}` + je Kern `${id}@${version}` (nach id sortiert), & 0x7fffffff (F4). Rein. */
 export function versionStamp(frameworkVersion: number, kernels: readonly { id: string; version: number }[]): number {

@@ -159,7 +159,7 @@ describe('helixClient', () => {
     expect(await helix.sendChatMessage('1001', '999', 'Hallo')).toEqual({ ok: true, messageId: 'abc-123-def' });
     expect(calls[0]).toMatchObject({ url: 'https://api.twitch.tv/helix/chat/messages', method: 'POST', body: JSON.stringify({ broadcaster_id: '1001', sender_id: '999', message: 'Hallo' }) });
     expect(calls[0]!.headers['content-type']).toBe('application/json');
-    expect(await helix.sendChatMessage('1001', '999', 'böse')).toEqual({ ok: false, reason: 'Nachricht abgelehnt.' });
+    expect(await helix.sendChatMessage('1001', '999', 'böse')).toEqual({ ok: false, reason: 'dropped', detail: 'msg_rejected: Nachricht abgelehnt.' });
   });
 
   it('conduits: list, create, update, bindShard', async () => {

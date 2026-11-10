@@ -23,7 +23,11 @@ export type Signal =
   | { kind: 'follow'; channel: Pid; at: string; user: SignalUser }
   | { kind: 'stream_state'; channel: Pid; at: string; live: boolean; viewers?: number };
 
-export type SendResult = { ok: true; messageId: string } | { ok: false; reason: string };
+/** Fehlercode einer Chat-Nachricht: steht im Nachweis announcement_sent und wird in der Web-App übersetzt. Nie Freitext. */
+export const SEND_ERROR_CODES = ['helix_unauthorized', 'helix_forbidden', 'helix_ratelimited', 'helix_unreachable', 'helix_error', 'dropped', 'send_failed'] as const;
+export type SendErrorCode = (typeof SEND_ERROR_CODES)[number];
+/** detail: Klartext nur für das Log, nie für das Journal. */
+export type SendResult = { ok: true; messageId: string } | { ok: false; reason: SendErrorCode; detail?: string };
 
 export interface FollowResult {
   userId: string;

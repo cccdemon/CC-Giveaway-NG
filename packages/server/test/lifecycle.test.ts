@@ -4,6 +4,9 @@ import { ANNOUNCEMENT_DEFAULTS, ANNOUNCEMENT_SENT } from '../src/framework/givea
 import { GIVEAWAY_EVENTS, giveawayStream } from '../src/framework/giveaway/state.js';
 import type { CommandResult } from '../src/framework/command-bus.js';
 import { readStream } from '../src/journal/journal.js';
+import { saveSnapshot } from '../src/journal/snapshots.js';
+import { FRAMEWORK_REDUCER_VERSION, versionStamp } from '../src/framework/kernel-registry.js';
+import { AT } from './helpers/db.js';
 import { GID, GID2, GID3, GID4, P1, P2, STREAMER, TEAM, at, createOpen, must, run, setupGiveaway, state } from './helpers/giveaway.js';
 
 let close: (() => Promise<void>) | undefined;
@@ -274,6 +277,23 @@ describe('Lebenszyklus', () => {
   });
 });
 
+describe('Reducer-Version (Snapshots)', () => {
+  it('a snapshot from before settings.announcements (framework version 5) is ignored, so the stream replays from the journal', async () => {
+    const s = await setup();
+    await createOpen(s.rt);
+    const head = (await s.pool.query<{ seq: number }>('SELECT max(seq)::int AS seq FROM events WHERE stream = $1', [giveawayStream(GID)])).rows[0]!.seq;
+    const before = await state(s.rt);
+    const oldSettings = Object.fromEntries(Object.entries(before.settings).filter(([k]) => k !== 'announcements'));
+    const stale = versionStamp(5, s.rt.kernels.list());
+    expect(FRAMEWORK_REDUCER_VERSION).toBeGreaterThan(5);
+    expect(s.rt.kernels.versionStamp()).not.toBe(stale);
+    await saveSnapshot(s.pool, giveawayStream(GID), { name: 'giveaway', version: stale }, head, { ...before, settings: oldSettings }, AT);
+    await must(s.rt, s.rt.handlers.changeSettings, { giveawayId: GID, settings: { prize: 'Neu' } });
+    expect((await state(s.rt)).settings.announcements).toEqual(ANNOUNCEMENT_DEFAULTS);
+    expect((await s.pool.query('SELECT announcements FROM giveaways WHERE id = $1', [GID])).rows[0]).toEqual({ announcements: ANNOUNCEMENT_DEFAULTS });
+  });
+});
+
 describe('Chat-Ansagen in den Einstellungen (Teilprojekt 8d)', () => {
   it('create and change_settings accept announcements and reject a template with a link; record_announcement writes announcement_sent only for system:ingest and never in draft', async () => {
     const s = await setup();
@@ -293,6 +313,7 @@ describe('Chat-Ansagen in den Einstellungen (Teilprojekt 8d)', () => {
     expect(sent).toMatchObject({ type: ANNOUNCEMENT_SENT, payload: { kind: 'opened', channel: P1, triggerEventId: '1', ok: true, messageId: 'm1' } });
     const [failed] = await must(s.rt, s.rt.handlers.recordAnnouncement, { ...rec, ok: false, error: 'rate_limited', messageId: undefined }, { actor: 'system:ingest' });
     expect(failed!.payload).toEqual({ kind: 'opened', channel: P1, triggerEventId: '1', ok: false, error: 'rate_limited' });
+    expect(await code(run(s.rt, s.rt.handlers.recordAnnouncement, { ...rec, ok: false, error: 'Twitch Helix: helix_error (500)' }, { actor: 'system:ingest' }))).toBe('invalid_announcement');
     const revert = await run(s.rt, s.rt.handlers.revert, { stream: giveawayStream(GID), eventId: sent!.id, reason: 'x' });
     expect(await code(Promise.resolve(revert))).toBe('not_reversible');
   });
