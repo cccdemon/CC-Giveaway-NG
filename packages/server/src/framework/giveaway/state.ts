@@ -5,6 +5,7 @@ import type { StreamReducer } from '../command-bus.js';
 import type { KernelRegistry } from '../kernel-registry.js';
 import type { FrozenLegal, LegalTexts } from '../legal.js';
 import { EVENT_VOIDED } from '../revert.js';
+import { ANNOUNCEMENT_DEFAULTS, type AnnouncementSettings } from './announcements.js';
 import type { GateConfig } from './gates.js';
 import { SERVICE_DEFAULTS, SERVICE_EVENT_TYPES, type BoostState, type ServiceSettings } from './services.js';
 
@@ -25,6 +26,8 @@ export interface GiveawaySettings extends ServiceSettings {
   legal: LegalTexts | null;
   /** Kontaktweg des Streamers für Gewinner (NEW_DESIGN.md 7.3), freier Text, höchstens 200 Zeichen. */
   contact: string | null;
+  /** Chat-Ansagen (NEW_DESIGN.md 10.3): stumm, Link, eigene Vorlagen. */
+  announcements: AnnouncementSettings;
 }
 
 export interface DrawRecord {
@@ -235,7 +238,7 @@ export function makeGiveawayReducer(kernels: KernelRegistry): StreamReducer<Give
       teamId: '',
       kernelId: '',
       kernelVersionAtCreate: 0,
-      settings: { config: {}, prize: '', sponsor: null, channels: [], winnersCount: 1, claimDays: 14, gates: [], legal: null, contact: null, ...SERVICE_DEFAULTS },
+      settings: { config: {}, prize: '', sponsor: null, channels: [], winnersCount: 1, claimDays: 14, gates: [], legal: null, contact: null, announcements: ANNOUNCEMENT_DEFAULTS, ...SERVICE_DEFAULTS },
       status: 'draft',
       registered: {},
       draws: [],

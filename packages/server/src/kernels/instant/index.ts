@@ -20,6 +20,8 @@ export interface InstantState {
 export const INSTANT_EVENTS = { windowOpened: 'instant_window_opened', windowClosed: 'instant_window_closed' } as const;
 
 const WINDOW_MIN = 10;
+const WINDOW_OPENED_TEXT = 'Anmeldefenster für „{preis}“ offen bis {bis}! Mach mit: {keyword}.';
+const WINDOW_CLOSED_TEXT = 'Das Anmeldefenster für „{preis}“ ist zu.';
 const WINDOW_MAX = 3600;
 
 function isIso(v: unknown): v is string {
@@ -164,5 +166,6 @@ export const instantKernel: Kernel<InstantConfig, InstantState> = {
     beta: true,
     emptyPool: 'Niemand hat sich im Anmeldefenster angemeldet.',
     columns: [{ key: 'registered', label: 'Angemeldet' }],
+    announcements: { [INSTANT_EVENTS.windowOpened]: WINDOW_OPENED_TEXT, [INSTANT_EVENTS.windowClosed]: WINDOW_CLOSED_TEXT },
   },
 };

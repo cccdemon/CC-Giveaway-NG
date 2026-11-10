@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { FRAMEWORK_EVENTS, type CreditedPayload, type Pid } from '../../kernel-api/index.js';
 import type { EventTypeRegistry } from '../../journal/event-types.js';
 import { reject } from '../../shared/rejection.js';
+import { ANNOUNCEMENT_DEFAULTS } from './announcements.js';
 import type { GiveawayState } from './state.js';
 
 export type Counting = 'registered' | 'first_seen';
@@ -58,6 +59,12 @@ export function upcastSettingsV1(s: unknown): unknown {
 export function upcastSettingsV2(s: unknown): unknown {
   const old = (s ?? {}) as Record<string, unknown>;
   return { ...old, contact: old.contact ?? null };
+}
+
+/** v3 → v4: Chat-Ansagen (Teilprojekt 8d, NEW_DESIGN.md 10.3). */
+export function upcastSettingsV3(s: unknown): unknown {
+  const old = (s ?? {}) as Record<string, unknown>;
+  return { ...old, announcements: old.announcements ?? ANNOUNCEMENT_DEFAULTS };
 }
 
 export const SERVICE_EVENT_TYPES = {

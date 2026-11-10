@@ -141,6 +141,10 @@ describe('Kern B Sofortverlosung', () => {
     ]);
     expect(k.display).toEqual({
       icon: '⚡', unit: null, beta: true, emptyPool: 'Niemand hat sich im Anmeldefenster angemeldet.', columns: [{ key: 'registered', label: 'Angemeldet' }],
+      announcements: {
+        [INSTANT_EVENTS.windowOpened]: 'Anmeldefenster für „{preis}“ offen bis {bis}! Mach mit: {keyword}.',
+        [INSTANT_EVENTS.windowClosed]: 'Das Anmeldefenster für „{preis}“ ist zu.',
+      },
     });
   });
 

@@ -9,7 +9,8 @@ import { frozenLegalSchema, legalSchema } from '../legal.js';
 import { registerRevertTypes } from '../revert.js';
 import { GATE_IDS } from './gates.js';
 import { NOT_REGISTERED_TEXT, TOO_LATE, TOO_LATE_TEXT } from './registration.js';
-import { KEYWORD_RE, PURGE_DAYS_MAX, PURGE_DAYS_MIN, chatBonusSchema, countingSchema, registerServiceEvents, upcastSettingsV1, upcastSettingsV2 } from './services.js';
+import { ANNOUNCEMENT_SENT, ANNOUNCEMENT_SENT_WHY, TEMPLATE_MAX } from './announcements.js';
+import { KEYWORD_RE, PURGE_DAYS_MAX, PURGE_DAYS_MIN, chatBonusSchema, countingSchema, registerServiceEvents, upcastSettingsV1, upcastSettingsV2, upcastSettingsV3 } from './services.js';
 import { GIVEAWAY_EVENTS, type GiveawaySettings, type GiveawayState, type GiveawayStatus, type WinnerStatus } from './state.js';
 
 const STATUSES = ['draft', 'open', 'paused', 'closed', 'drawn', 'completed', 'cancelled'] as const satisfies readonly GiveawayStatus[];
@@ -31,6 +32,7 @@ const settingsSchema = z.object({
   keyword: z.string().regex(KEYWORD_RE).nullable(),
   chatBonus: chatBonusSchema,
   contact: z.string().max(CONTACT_MAX).nullable(),
+  announcements: z.object({ muted: z.boolean(), links: z.boolean(), texts: z.record(z.string(), z.string().max(TEMPLATE_MAX)) }),
 });
 
 /** v1 → v2: legal und die Felder der Dienste (Teilprojekt 5) mit Defaults. v2 → v3: contact (Teilprojekt 8a). */
@@ -43,6 +45,7 @@ const liftSettings = (up: (s: unknown) => unknown) => ({
 });
 const v1 = liftSettings(upcastSettingsV1);
 const v2 = liftSettings(upcastSettingsV2);
+const v3 = liftSettings(upcastSettingsV3);
 
 const pidSchema = z.object({ pid: z.uuid() });
 
@@ -69,15 +72,28 @@ function registerKernelEvent(registry: EventTypeRegistry, def: KernelEventDef): 
 
 export function registerGiveawayEvents(registry: EventTypeRegistry, kernels: KernelRegistry): void {
   registry.register({
+    type: ANNOUNCEMENT_SENT,
+    version: 1,
+    schema: z.object({
+      kind: z.string().min(1).max(60),
+      channel: z.uuid(),
+      triggerEventId: z.string().min(1),
+      ok: z.boolean(),
+      error: z.string().max(200).optional(),
+      messageId: z.string().max(200).optional(),
+    }),
+    reversal: { kind: 'none', why: ANNOUNCEMENT_SENT_WHY },
+  });
+  registry.register({
     type: GIVEAWAY_EVENTS.created,
-    version: 3,
+    version: 4,
     schema: z.object({
       teamId: z.uuid(),
       kernelId: z.string().min(1),
       kernelVersion: z.int().min(1),
       settings: settingsSchema,
     }),
-    upcasters: { 1: v1.created, 2: v2.created },
+    upcasters: { 1: v1.created, 2: v2.created, 3: v3.created },
     reversal: { kind: 'none', why: 'Einen Entwurf nimmst du nicht zurück. Brich das Giveaway ab.' },
   });
 
@@ -97,9 +113,9 @@ export function registerGiveawayEvents(registry: EventTypeRegistry, kernels: Ker
 
   registry.register({
     type: GIVEAWAY_EVENTS.settingsChanged,
-    version: 3,
+    version: 4,
     schema: z.object({ before: settingsSchema, after: settingsSchema }),
-    upcasters: { 1: v1.changed, 2: v2.changed },
+    upcasters: { 1: v1.changed, 2: v2.changed, 3: v3.changed },
     reversal: {
       kind: 'compensate',
       inverse(target, state) {

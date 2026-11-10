@@ -26,8 +26,8 @@ export function giveawaysProjector(kernels: KernelRegistry): StateProjector<Give
       await c.query(
         `INSERT INTO giveaways (id, team_id, kernel, kernel_version, status, prize, sponsor, winners_count, claim_days,
            config, channels, gates, registered_count, pool_size, pool_weight, last_seq, created_at, updated_at,
-           counting, purge_days, closed_at, purged_at, boost)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $17, $18, $19, $20, $21, $22)
+           counting, purge_days, closed_at, purged_at, boost, keyword, announcements)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $17, $18, $19, $20, $21, $22, $23, $24)
          ON CONFLICT (id) DO UPDATE SET
            team_id = EXCLUDED.team_id, kernel = EXCLUDED.kernel, kernel_version = EXCLUDED.kernel_version,
            status = EXCLUDED.status, prize = EXCLUDED.prize, sponsor = EXCLUDED.sponsor,
@@ -35,7 +35,8 @@ export function giveawaysProjector(kernels: KernelRegistry): StateProjector<Give
            channels = EXCLUDED.channels, gates = EXCLUDED.gates, registered_count = EXCLUDED.registered_count,
            pool_size = EXCLUDED.pool_size, pool_weight = EXCLUDED.pool_weight, last_seq = EXCLUDED.last_seq,
            updated_at = EXCLUDED.updated_at, counting = EXCLUDED.counting, purge_days = EXCLUDED.purge_days,
-           closed_at = EXCLUDED.closed_at, purged_at = EXCLUDED.purged_at, boost = EXCLUDED.boost`,
+           closed_at = EXCLUDED.closed_at, purged_at = EXCLUDED.purged_at, boost = EXCLUDED.boost,
+           keyword = EXCLUDED.keyword, announcements = EXCLUDED.announcements`,
         [
           idOf(stream),
           state.teamId,
@@ -59,6 +60,8 @@ export function giveawaysProjector(kernels: KernelRegistry): StateProjector<Give
           state.closedAt === null ? null : new Date(state.closedAt),
           state.purgedAt === null ? null : new Date(state.purgedAt),
           state.boost === null ? null : JSON.stringify(state.boost),
+          s.keyword,
+          JSON.stringify(s.announcements),
         ],
       );
     },

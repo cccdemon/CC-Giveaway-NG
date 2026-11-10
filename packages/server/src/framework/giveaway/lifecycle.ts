@@ -10,6 +10,7 @@ import { checkLegal } from '../legal.js';
 import { makeRevertHandler, type RevertCommand, type RevertPrepared } from '../revert.js';
 import { TEAM_INACTIVE } from '../team/commands.js';
 import type { BanDirectory, TeamChannels, TeamDirectory } from '../team/directory.js';
+import { ANNOUNCEMENT_DEFAULTS, validateAnnouncements } from './announcements.js';
 import { GIVEAWAY_NOT_FOUND, INVALID_ID, UUID_RE, authorizeControl, type GiveawayAuthorizer } from './authorize.js';
 import { checkGateConfig, type GateConfig } from './gates.js';
 import { KEYWORD_RE, PURGE_DAYS_MAX, PURGE_DAYS_MIN, SERVICE_DEFAULTS, chatBonusSchema, countingSchema, type ChatBonusSettings } from './services.js';
@@ -98,6 +99,9 @@ const INVALID_GATE = (): Rejection => reject('invalid_gate', 'Eine Bedingung ist
 function checkSettings(kernel: AnyKernel, s: GiveawaySettings): GiveawaySettings | Rejection {
   const config = validateConfig(kernel.configSchema, s.config);
   if (isRejection(config)) return config;
+  const announcements = validateAnnouncements(s.announcements, kernel);
+  if (isRejection(announcements)) return announcements;
+  s = { ...s, announcements };
   if (typeof s.prize !== 'string' || !s.prize.trim()) return reject('prize_required', 'Gib an, was es zu gewinnen gibt.');
   if (s.prize.length > TEXT_MAX) return reject('prize_too_long', 'Der Gewinn darf höchstens 200 Zeichen haben.');
   if (s.sponsor !== null && (typeof s.sponsor !== 'string' || s.sponsor.length > TEXT_MAX)) {
@@ -185,6 +189,7 @@ export function createGiveawayHandler(d: GiveawayDeps): CommandHandler<CreateGiv
         purgeDays: s.purgeDays ?? SERVICE_DEFAULTS.purgeDays,
         keyword: s.keyword ?? SERVICE_DEFAULTS.keyword,
         chatBonus: s.chatBonus ?? SERVICE_DEFAULTS.chatBonus,
+        announcements: s.announcements ?? ANNOUNCEMENT_DEFAULTS,
       });
       if (isRejection(settings)) return settings;
       if (team !== null && !team.active) return TEAM_INACTIVE();
@@ -255,6 +260,7 @@ export function changeSettingsHandler(d: GiveawayDeps): CommandHandler<ChangeSet
         keyword: s.keyword === undefined ? before.keyword : s.keyword,
         // Teilangaben des Chat-Bonus behalten die übrigen Werte (Spec 6.2: Werte bleiben beim Abschalten).
         chatBonus: s.chatBonus === undefined ? before.chatBonus : ({ ...before.chatBonus, ...(s.chatBonus as Partial<ChatBonusSettings>) } as ChatBonusSettings),
+        announcements: s.announcements ?? before.announcements,
       });
       if (isRejection(after)) return after;
       // Nur neu hinzukommende Kanäle müssen zum Team gehören. Eine unveränderte Liste geht durch, auch nach einem Austritt

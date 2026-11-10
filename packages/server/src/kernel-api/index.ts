@@ -136,6 +136,8 @@ export interface DisplaySpec {
   beta: boolean;
   emptyPool: string;
   columns: { key: string; label: string }[];
+  /** Default-Texte der Chat-Ansagen je Kern-Ereignistyp (NEW_DESIGN.md 10.3). Platzhalter {preis}, {keyword}, {bis}. */
+  announcements?: Record<string, string>;
 }
 
 export interface Kernel<Config, State> {

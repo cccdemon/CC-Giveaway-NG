@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { denyUsers } from '../src/framework/giveaway/authorize.js';
+import { ANNOUNCEMENT_DEFAULTS, ANNOUNCEMENT_SENT } from '../src/framework/giveaway/announcements.js';
 import { GIVEAWAY_EVENTS, giveawayStream } from '../src/framework/giveaway/state.js';
 import type { CommandResult } from '../src/framework/command-bus.js';
 import { readStream } from '../src/journal/journal.js';
@@ -39,15 +40,16 @@ describe('Lebenszyklus', () => {
       settings: {
         config: { windowSec: 120 }, prize: 'Key', sponsor: null, channels: [P1], winnersCount: 1, claimDays: 14, gates: [], legal: null,
         contact: null, counting: 'registered', purgeDays: 7, keyword: null, chatBonus: { enabled: true, sec: 2, minWords: 4, cooldownSec: 10 },
+        announcements: { muted: false, links: true, texts: {} },
       },
     });
-    expect(events[0]!.typeVersion).toBe(3);
+    expect(events[0]!.typeVersion).toBe(4);
     const row = (await pool.query('SELECT * FROM giveaways WHERE id = $1', [GID])).rows[0];
     expect(row).toMatchObject({
       id: GID, status: 'draft', team_id: TEAM, kernel: 'instant', kernel_version: 1, claim_days: 14, winners_count: 1,
       prize: 'Key', sponsor: null, config: { windowSec: 120 }, channels: [P1], gates: [],
       registered_count: 0, pool_size: 0, pool_weight: 0, last_seq: 1,
-      counting: 'registered', purge_days: 7, closed_at: null, purged_at: null, boost: null,
+      counting: 'registered', purge_days: 7, closed_at: null, purged_at: null, boost: null, keyword: null, announcements: { muted: false, links: true, texts: {} },
     });
   });
 
@@ -269,5 +271,29 @@ describe('Lebenszyklus', () => {
       rejection: { rejected: true, code: 'keyword_reserved', message: 'Dieses Wort ist ein Chat-Befehl des Kerns. Wähle ein anderes Keyword.' },
     });
     expect(await code(run(rt, rt.handlers.changeSettings, { giveawayId: GID, settings: { keyword: '!go' } }))).toBe('ok');
+  });
+});
+
+describe('Chat-Ansagen in den Einstellungen (Teilprojekt 8d)', () => {
+  it('create and change_settings accept announcements and reject a template with a link; record_announcement writes announcement_sent only for system:ingest and never in draft', async () => {
+    const s = await setup();
+    expect(await code(run(s.rt, s.rt.handlers.create, createCmd({}, { announcements: { muted: false, links: true, texts: { opened: 'Siehe https://x.example' } } })))).toBe('invalid_announcement');
+    await must(s.rt, s.rt.handlers.create, createCmd({}, { announcements: { muted: true, links: false, texts: { opened: 'Los, {preis}!' } } }));
+    expect((await state(s.rt)).settings.announcements).toEqual({ muted: true, links: false, texts: { opened: 'Los, {preis}!' } });
+    const row = await s.pool.query('SELECT keyword, announcements FROM giveaways WHERE id = $1', [GID]);
+    expect(row.rows[0]).toEqual({ keyword: null, announcements: { muted: true, links: false, texts: { opened: 'Los, {preis}!' } } });
+    expect(await code(run(s.rt, s.rt.handlers.changeSettings, { giveawayId: GID, settings: { announcements: { ...ANNOUNCEMENT_DEFAULTS, texts: { winner: '' } } } }))).toBe('invalid_announcement');
+    await must(s.rt, s.rt.handlers.changeSettings, { giveawayId: GID, settings: { keyword: '!go', announcements: ANNOUNCEMENT_DEFAULTS } });
+    expect((await s.pool.query('SELECT keyword FROM giveaways WHERE id = $1', [GID])).rows[0]).toEqual({ keyword: '!go' });
+    const rec = { giveawayId: GID, kind: 'opened', channel: P1, triggerEventId: '1', ok: true, messageId: 'm1' };
+    expect(await code(run(s.rt, s.rt.handlers.recordAnnouncement, rec, { actor: 'system:ingest' }))).toBe('not_open');
+    await must(s.rt, s.rt.handlers.open, { giveawayId: GID });
+    expect(await code(run(s.rt, s.rt.handlers.recordAnnouncement, rec, { actor: STREAMER }))).toBe('system_only');
+    const [sent] = await must(s.rt, s.rt.handlers.recordAnnouncement, rec, { actor: 'system:ingest' });
+    expect(sent).toMatchObject({ type: ANNOUNCEMENT_SENT, payload: { kind: 'opened', channel: P1, triggerEventId: '1', ok: true, messageId: 'm1' } });
+    const [failed] = await must(s.rt, s.rt.handlers.recordAnnouncement, { ...rec, ok: false, error: 'rate_limited', messageId: undefined }, { actor: 'system:ingest' });
+    expect(failed!.payload).toEqual({ kind: 'opened', channel: P1, triggerEventId: '1', ok: false, error: 'rate_limited' });
+    const revert = await run(s.rt, s.rt.handlers.revert, { stream: giveawayStream(GID), eventId: sent!.id, reason: 'x' });
+    expect(await code(Promise.resolve(revert))).toBe('not_reversible');
   });
 });
