@@ -2,7 +2,9 @@
 import type pg from 'pg';
 import type { BusLogger } from '../framework/command-bus.js';
 import type { Runtime } from '../framework/runtime.js';
+import type { Subscriber } from '../framework/subscriber.js';
 import { scheduleLoop } from '../scheduler/loop.js';
+import { Announcer } from './announcer.js';
 import { Bundler } from './bundler.js';
 import { StatusBuffer } from './channel-status.js';
 import { DIRECTORY_INTERVAL_MS, Directory, type ChannelSource } from './directory.js';
@@ -27,6 +29,10 @@ export interface IngestWorkerOptions {
   tickMs?: number;
   /** Takt des Adapters: Simulator-Tick oder Anwesenheits-Polling bei voller Minute. Läuft vor dem Bündler. */
   onTick?: (now: Date) => void | Promise<void>;
+  /** Live-Push der Ereignisse: mit Abonnent sendet der Worker Chat-Ansagen für seine Kanäle (NEW_DESIGN.md 10.3). */
+  subscriber?: Subscriber;
+  /** Basis der öffentlichen Giveaway-Links in Ansagen. */
+  publicUrl?: string;
 }
 
 export interface IngestWorker {
@@ -34,6 +40,8 @@ export interface IngestWorker {
   stop(): Promise<void>;
   tick(now: Date): Promise<void>;
   refresh(): Promise<void>;
+  /** null ohne Abonnent. */
+  announcer: Announcer | null;
 }
 
 /**
@@ -59,6 +67,10 @@ export function createIngestWorker(o: IngestWorkerOptions): IngestWorker {
   const dispatch = dispatcher({ rt: o.rt, lookup: o.lookup, log: o.log, now });
   const bundler = new Bundler({ flush: async (b) => void (await dispatch.handle(b)), log: o.log });
   const loops: { stop(): Promise<void> }[] = [];
+  const announcer = o.subscriber
+    ? new Announcer({ pool: o.pool, rt: o.rt, adapter: o.adapter, directory, publicUrl: o.publicUrl ?? '', log: o.log, now })
+    : null;
+  let detach: (() => void) | null = null;
   /** Zuletzt notierter Stand je Kanal, damit unveränderte Werte keine Schreibabfrage auslösen. */
   const noted = new Map<string, { problem: string | null | undefined; signalMs: number }>();
   const lastOf = (pid: string) => noted.get(pid) ?? { problem: undefined, signalMs: -Infinity };
@@ -104,18 +116,23 @@ export function createIngestWorker(o: IngestWorkerOptions): IngestWorker {
   return {
     async start() {
       await refresh();
+      if (announcer && o.subscriber) detach = announcer.attach(o.subscriber);
       loops.push(
         scheduleLoop(refresh, o.directoryIntervalMs ?? DIRECTORY_INTERVAL_MS, onLoopError),
         scheduleLoop(() => tick(now()), o.tickMs ?? TICK_MS, onLoopError),
       );
     },
     async stop() {
+      detach?.();
+      detach = null;
       await Promise.all(loops.splice(0).map((l) => l.stop()));
+      await announcer?.idle();
       await bundler.drain();
       await status.flush(o.pool, now());
       await o.adapter.close();
     },
     tick,
     refresh,
+    announcer,
   };
 }

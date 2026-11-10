@@ -6,6 +6,7 @@ import { createPool } from '../db/pool.js';
 import type { BusLogger } from '../framework/command-bus.js';
 import { denyUsers } from '../framework/giveaway/authorize.js';
 import { RedisPublisher } from '../framework/publisher.js';
+import { RedisSubscriber } from '../framework/subscriber.js';
 import { createRuntime } from '../framework/runtime.js';
 import { noAdmins } from '../platform/admin.js';
 import { attachPlatform } from '../platform/runtime.js';
@@ -41,7 +42,11 @@ async function main() {
     teamAuth: denyUsersTeams, teamDirectory: pgTeamDirectory(), bans: pgBanDirectory(),
   });
   attachPlatform(rt, { admins: noAdmins });
-  const { worker } = buildIngest(config, { pool, rt, tokenKey, log });
+  // Eigene Verbindung für das Abo: im Abo-Modus kann ioredis nichts anderes.
+  const subscriber = new RedisSubscriber(new Redis(config.redisUrl));
+  subscriber.onError((err) => log.error({ err }, 'Die Redis-Verbindung für Ansagen hat einen Fehler gemeldet. Sie verbindet neu.'));
+  await subscriber.start();
+  const { worker } = buildIngest(config, { pool, rt, tokenKey, log, subscriber });
   await worker.start();
   console.log(JSON.stringify({ msg: 'Ingest läuft.', adapter: config.ingestAdapter, worker: config.ingestWorkerIndex, workers: config.ingestWorkers }));
 
@@ -49,6 +54,7 @@ async function main() {
     console.log(JSON.stringify({ msg: 'Der Prozess fährt herunter.', signal }));
     worker
       .stop()
+      .then(() => subscriber.stop())
       .then(() => redis.quit())
       .then(() => pool.end())
       .then(() => process.exit(0))

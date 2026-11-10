@@ -4,14 +4,18 @@ import type { EventRecord, StreamId } from '../journal/types.js';
 import { channelFor, type Publisher } from './publisher.js';
 
 export type EventListener = (events: EventRecord[]) => void;
+export type StreamListener = (stream: StreamId, events: EventRecord[]) => void;
 
 export interface Subscriber {
   /** Ruft fn je veröffentlichtem Ereignisbündel des Stroms. Die Rückgabe beendet das Abonnement. */
   subscribe(stream: StreamId, fn: EventListener): () => void;
+  /** Ruft fn je veröffentlichtem Bündel jedes Stroms (Ingest-Ansagen). Die Rückgabe beendet das Abonnement. */
+  subscribeAll(fn: StreamListener): () => void;
 }
 
 class Listeners {
   private readonly byStream = new Map<StreamId, Set<EventListener>>();
+  private readonly all = new Set<StreamListener>();
 
   add(stream: StreamId, fn: EventListener): () => void {
     const set = this.byStream.get(stream) ?? new Set<EventListener>();
@@ -23,8 +27,14 @@ class Listeners {
     };
   }
 
+  addAll(fn: StreamListener): () => void {
+    this.all.add(fn);
+    return () => void this.all.delete(fn);
+  }
+
   emit(stream: StreamId, events: EventRecord[]): void {
     for (const fn of this.byStream.get(stream) ?? []) fn(events);
+    for (const fn of this.all) fn(stream, events);
   }
 }
 
@@ -40,6 +50,10 @@ export class LocalBus implements Publisher, Subscriber {
 
   subscribe(stream: StreamId, fn: EventListener): () => void {
     return this.listeners.add(stream, fn);
+  }
+
+  subscribeAll(fn: StreamListener): () => void {
+    return this.listeners.addAll(fn);
   }
 }
 
@@ -79,6 +93,10 @@ export class RedisSubscriber implements Subscriber {
 
   subscribe(stream: StreamId, fn: EventListener): () => void {
     return this.listeners.add(stream, fn);
+  }
+
+  subscribeAll(fn: StreamListener): () => void {
+    return this.listeners.addAll(fn);
   }
 
   /** Redis weg: die App schließt die Live-Verbindungen, die Oberflächen verbinden neu (NEW_DESIGN.md 12.1). */

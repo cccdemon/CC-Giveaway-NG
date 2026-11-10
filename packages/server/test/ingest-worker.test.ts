@@ -8,6 +8,7 @@ import { pgGiveawayLookup } from '../src/ingest/dispatch.js';
 import type { AdapterHealth, IngestAdapter, Signal, SignalUser } from '../src/ingest/signals.js';
 import { SimulatorAdapter } from '../src/ingest/simulator.js';
 import { SIGNAL_NOTE_MIN_MS, createIngestWorker, nonBlocking } from '../src/ingest/worker.js';
+import { LocalBus } from '../src/framework/subscriber.js';
 import { AT } from './helpers/db.js';
 import { GID, GID2, GID3, P1, P2, P3, createOpen, must, setupGiveaway } from './helpers/giveaway.js';
 
@@ -173,5 +174,32 @@ describe('Ingest-Worker', () => {
     a.emit({ kind: 'presence', channel: P1, minute: minuteOf(AT), users: [ALICE] });
     await s.worker.stop();
     expect(s.spy).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('Ingest-Worker und Ansagen', () => {
+  it('with a subscriber the worker builds an Announcer that sends on the owned channels after start and stops with the worker', async () => {
+    const bus = new LocalBus();
+    const s = await setupGiveaway({ publisher: bus });
+    close = s.close;
+    const sim = new SimulatorAdapter({ viewersPerChannel: 1, now: () => AT });
+    const worker = createIngestWorker({
+      adapter: sim, source: { list: async () => [{ pid: P1, twitchId: '1', watch: 'full' }] }, lookup: pgGiveawayLookup(s.pool), rt: s.rt, pool: s.pool,
+      workers: 1, index: 0, log: { error: vi.fn() }, now: () => AT, subscriber: bus, publicUrl: 'https://g.example', directoryIntervalMs: 60_000, tickMs: 60_000,
+    });
+    expect(worker.announcer).not.toBeNull();
+    await worker.start();
+    await createOpen(s.rt);
+    await worker.announcer!.idle();
+    expect(sim.sent).toEqual([{ channel: P1, text: `Giveaway „Key“ ist offen! Mach im Portal mit. https://g.example/g/${GID}` }]);
+    await worker.stop();
+    await must(s.rt, s.rt.handlers.pause, { giveawayId: GID });
+    await worker.announcer!.idle();
+    expect(sim.sent).toHaveLength(1);
+  });
+
+  it('without a subscriber there is no announcer', async () => {
+    const s = await setup(controllable());
+    expect(s.worker.announcer).toBeNull();
   });
 });

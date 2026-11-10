@@ -3,6 +3,7 @@ import type pg from 'pg';
 import { ConfigError, type Config } from '../config/config.js';
 import type { BusLogger } from '../framework/command-bus.js';
 import type { Runtime } from '../framework/runtime.js';
+import type { Subscriber } from '../framework/subscriber.js';
 import { twitchAuthClient } from '../identity/twitch.js';
 import { minuteOf } from './bundler.js';
 import { pgChannelSource } from './directory.js';
@@ -22,6 +23,8 @@ export interface IngestDeps {
   log: BusLogger;
   fetch?: typeof fetch;
   now?: () => Date;
+  /** Live-Push für Chat-Ansagen; ohne Abonnent sendet der Ingest keine Ansagen. */
+  subscriber?: Subscriber;
 }
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -31,6 +34,7 @@ export function buildIngest(config: Config, deps: IngestDeps): { worker: IngestW
   const common = {
     source: pgChannelSource(deps.pool), lookup: pgGiveawayLookup(deps.pool), rt: deps.rt, pool: deps.pool,
     workers: config.ingestWorkers, index: config.ingestWorkerIndex, log: deps.log, now,
+    ...(deps.subscriber ? { subscriber: deps.subscriber } : {}), publicUrl: config.publicUrl,
   };
   if (config.ingestAdapter === 'simulator') {
     const sim = new SimulatorAdapter({ viewersPerChannel: config.ingestSimViewers, seed: config.ingestSimSeed, now });
