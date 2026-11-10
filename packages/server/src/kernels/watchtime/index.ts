@@ -6,6 +6,7 @@ import {
   type CorrectedPayload,
   type CreditedPayload,
   type Kernel,
+  type LegacyImportedPayload,
   type KernelEvent,
   type Pid,
 } from '../../kernel-api/index.js';
@@ -99,6 +100,23 @@ export const watchtimeKernel: Kernel<WatchtimeConfig, WatchtimeState> = {
       case FRAMEWORK_EVENTS.watchCorrected: {
         const c = entriesOf(event.payload);
         return c ? add(state, c.channel, c.entries, 1) : state;
+      }
+      case FRAMEWORK_EVENTS.legacyImported: {
+        // Altbestand (NEW_DESIGN.md 15.6): derselbe Zustand, als hätte der Rahmen die Sekunden minütlich gebucht.
+        const p = event.payload as Partial<LegacyImportedPayload> | null;
+        if (!p || !Array.isArray(p.entries)) return state;
+        const byChannel = new Map<Pid, { pid: Pid; sec: number }[]>();
+        for (const e of p.entries) {
+          if (typeof e?.pid !== 'string' || typeof e?.channel !== 'string' || typeof e?.sec !== 'number') continue;
+          const list = byChannel.get(e.channel) ?? [];
+          list.push({ pid: e.pid, sec: e.sec });
+          byChannel.set(e.channel, list);
+        }
+        let next = state;
+        for (const [channel, entries] of byChannel) next = add(next, channel, entries, 1);
+        const registered = Array.isArray(p.registered) ? p.registered.filter((x): x is Pid => typeof x === 'string') : [];
+        if (registered.length === 0) return next;
+        return { ...next, registered: [...new Set([...next.registered, ...registered])].sort() };
       }
       default:
         return state;

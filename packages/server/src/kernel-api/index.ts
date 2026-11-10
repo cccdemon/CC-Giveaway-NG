@@ -33,11 +33,13 @@ export const FRAMEWORK_EVENTS = {
   watchCredited: 'watch_credited',
   chatCredited: 'chat_credited',
   watchCorrected: 'watch_corrected',
+  /** Übernahme aus dem Altsystem (NEW_DESIGN.md 15): Sekunden je pid und Kanal auf einmal, Anmeldungen, Zustand. */
+  legacyImported: 'legacy_imported',
 } as const;
 
 /** Welche Rahmen-Ereignisse ein Dienst erzeugt (NEW_DESIGN.md 6). Der Rahmen reicht sie an Kerne mit diesem Dienst weiter. */
 export const SERVICE_EVENTS: Record<ServiceId, readonly string[]> = {
-  watchtime: [FRAMEWORK_EVENTS.watchCredited, FRAMEWORK_EVENTS.watchCorrected],
+  watchtime: [FRAMEWORK_EVENTS.watchCredited, FRAMEWORK_EVENTS.watchCorrected, FRAMEWORK_EVENTS.legacyImported],
   chatBonus: [FRAMEWORK_EVENTS.chatCredited],
   boost: [],
   registration: [FRAMEWORK_EVENTS.registered, FRAMEWORK_EVENTS.withdrawn],
@@ -55,6 +57,15 @@ export interface CreditedPayload {
 export interface CorrectedPayload {
   channel: Pid;
   entries: { pid: Pid; sec: number }[];
+}
+
+/** Payload von legacy_imported: Sekunden je pid und Kanal (Faktor 1), Anmeldungen, Zustand nach der Übernahme, Zustimmungsfassung. */
+export interface LegacyImportedPayload {
+  legacySessionId: string;
+  status: 'paused' | 'closed';
+  terms: { version: number; text: string } | null;
+  registered: Pid[];
+  entries: { pid: Pid; channel: Pid; sec: number }[];
 }
 
 /** Ganze Minuten als Text: „0 min“, „37 min“, „1 h 23 min“, „100 h“. Negatives zählt als 0. */

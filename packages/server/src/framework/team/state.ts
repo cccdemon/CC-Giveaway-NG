@@ -23,6 +23,8 @@ export const TEAM_EVENTS = {
   reactivated: 'team_reactivated',
   banned: 'participant_banned',
   unbanned: 'participant_unbanned',
+  /** Zuordnung zum Team des Altsystems (NEW_DESIGN.md 15.6), direkt nach team_created. */
+  imported: 'team_imported',
 } as const;
 
 export const TEAM_NAME_MAX = 60;

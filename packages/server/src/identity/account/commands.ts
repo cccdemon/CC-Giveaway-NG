@@ -48,7 +48,7 @@ function self(cmd: AccountCmd, ctx: CommandContext): Rejection | null {
   return authorizeSelf(cmd.pid, ctx.actor, SELF_TEXT);
 }
 
-/** Anmeldung nach dem Twitch-Callback. Akteur ist `system:twitch` (oder die Person selbst). */
+/** Anmeldung nach dem Twitch-Callback. Akteur ist `system:twitch` (oder die Person selbst); die Übernahme legt Konten als `system:migration` an (NEW_DESIGN.md 15.6). */
 export function signInHandler(): Handler<SignInCmd, { pid: string }> {
   return {
     type: 'sign_in',
@@ -58,7 +58,7 @@ export function signInHandler(): Handler<SignInCmd, { pid: string }> {
       if (typeof cmd.pid !== 'string' || !UUID_RE.test(cmd.pid) || typeof cmd.soloTeamId !== 'string' || !UUID_RE.test(cmd.soloTeamId)) {
         return reject('invalid_id', 'Die ID ist keine gültige UUID.');
       }
-      if (ctx.actor === 'system:twitch') return null;
+      if (ctx.actor === 'system:twitch' || ctx.actor === 'system:migration') return null;
       return authorizeSelf(cmd.pid, ctx.actor, SELF_TEXT);
     },
     prepare: async (c, cmd, ctx) => ({ pid: await upsertIdentity(c, cmd.user, cmd.pid, ctx.now) }),

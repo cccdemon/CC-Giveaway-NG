@@ -74,6 +74,26 @@ describe('Kern A Zuschauzeit', () => {
     expect(s.registered).toEqual(['p-a']);
   });
 
+  it('reduce(legacy_imported) equals the state after minute-wise watch_credited: sec per pid and channel, pool, viewerView, registered', () => {
+    const minutes: KernelEvent[] = [];
+    for (let i = 0; i < 60; i += 1) minutes.push(credit(CH1, [{ pid: 'p1', sec: 60 }, { pid: 'p2', sec: 30 }]));
+    for (let i = 0; i < 120; i += 1) minutes.push(credit(CH2, [{ pid: 'p2', sec: 60 }]));
+    minutes.push(ev(FRAMEWORK_EVENTS.registered, { pid: 'p2' }), ev(FRAMEWORK_EVENTS.registered, { pid: 'p1' }));
+    const booked = apply(fresh(), minutes);
+    const imported = apply(fresh(), [
+      ev(FRAMEWORK_EVENTS.legacyImported, {
+        legacySessionId: 'sess_1', status: 'paused', terms: null, registered: ['p2', 'p1'],
+        entries: [{ pid: 'p1', channel: CH1, sec: 3600 }, { pid: 'p2', channel: CH1, sec: 1800 }, { pid: 'p2', channel: CH2, sec: 7200 }],
+      }),
+    ]);
+    expect(imported).toEqual(booked);
+    expect(k.pool(imported, config)).toEqual(k.pool(booked, config));
+    expect(k.pool(imported, config)).toEqual([{ pid: 'p2', weight: 1 }]);
+    expect(k.viewerView(imported, 'p2', config)).toEqual(k.viewerView(booked, 'p2', config));
+    expect(k.reduce(imported, ev(FRAMEWORK_EVENTS.legacyImported, { entries: 'x' }), config)).toBe(imported);
+    expect(k.reduce(imported, ev(FRAMEWORK_EVENTS.legacyImported, null), config)).toBe(imported);
+  });
+
   it('unknown events and malformed payloads leave the state unchanged', () => {
     const s = apply(fresh(), [credit(CH1, [{ pid: 'p1', sec: 60 }])]);
     expect(k.reduce(s, ev('watchtime_other', {}), config)).toBe(s);

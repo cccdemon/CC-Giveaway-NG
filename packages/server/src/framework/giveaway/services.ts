@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { FRAMEWORK_EVENTS, type CreditedPayload, type Pid } from '../../kernel-api/index.js';
 import type { EventTypeRegistry } from '../../journal/event-types.js';
 import { reject } from '../../shared/rejection.js';
+import { TERMS_TEXT_MAX } from '../legal.js';
 import { ANNOUNCEMENT_DEFAULTS } from './announcements.js';
 import type { GiveawayState } from './state.js';
 
@@ -91,6 +92,16 @@ export const correctedSchema = z.object({
   entries: z.array(z.object({ pid: z.uuid(), sec: z.int().refine((n) => n !== 0, 'sec darf nicht 0 sein') })).min(1),
 });
 
+/** Übernahme aus dem Altsystem (NEW_DESIGN.md 15.6): Umkehrart none, der Grund steht in der UI. */
+export const LEGACY_IMPORTED_WHY = 'Altbestand. Korrektur über Zeit-Korrektur.';
+export const legacyImportedSchema = z.object({
+  legacySessionId: z.string().min(1).max(100),
+  status: z.enum(['paused', 'closed']),
+  terms: z.object({ version: z.int().min(1), text: z.string().min(1).max(TERMS_TEXT_MAX) }).nullable(),
+  registered: z.array(z.uuid()),
+  entries: z.array(z.object({ pid: z.uuid(), channel: z.uuid(), sec: z.int().min(1) })),
+});
+
 export interface BoostState {
   factor: number;
   since: string;
@@ -140,6 +151,12 @@ export function registerServiceEvents(registry: EventTypeRegistry): void {
         return { type: FRAMEWORK_EVENTS.watchCorrected, payload: { channel: p.channel, entries: p.entries.map((e) => ({ pid: e.pid, sec: -e.sec })) } };
       },
     },
+  });
+  registry.register({
+    type: FRAMEWORK_EVENTS.legacyImported,
+    version: 1,
+    schema: legacyImportedSchema,
+    reversal: { kind: 'none', why: LEGACY_IMPORTED_WHY },
   });
   registry.register({
     type: SERVICE_EVENT_TYPES.boostStarted,

@@ -20,6 +20,8 @@ import {
 import { noGates, type GateChecker } from './giveaway/gates.js';
 import { correctWatchHandler, startBoostHandler, stopBoostHandler, type CorrectWatchCmd, type StartBoostCmd } from './giveaway/boost.js';
 import { registerGiveawayEvents } from './giveaway/events.js';
+import { importLegacyGiveawayHandler, type ImportLegacyGiveawayCmd } from './giveaway/legacy.js';
+import { legacyImportsProjector, legacyTeamsProjector } from './legacy-projectors.js';
 import { purgeUnregisteredHandler } from './giveaway/purge.js';
 import { recordAnnouncementHandler, type RecordAnnouncementCmd } from './giveaway/announce-record.js';
 import {
@@ -50,6 +52,7 @@ import {
   createInviteHandler,
   createTeamHandler,
   deactivateTeamHandler,
+  importLegacyTeamHandler,
   joinTeamHandler,
   leaveTeamHandler,
   reactivateTeamHandler,
@@ -58,6 +61,7 @@ import {
   teamRevertHandler,
   unbanParticipantHandler,
   type CreateTeamCmd,
+  type ImportLegacyTeamCmd,
   type InviteCmd,
   type JoinTeamCmd,
   type MemberCmd,
@@ -110,6 +114,8 @@ export interface TeamHandlers {
   ban: TeamHandler<MemberCmd>;
   unban: TeamHandler<MemberCmd>;
   revert: CommandHandler<RevertCommand, TeamState, RevertPrepared>;
+  /** Übernahme eines Mehrpersonen-Teams (NEW_DESIGN.md 15), nur system:migration. */
+  importLegacy: CommandHandler<ImportLegacyTeamCmd, TeamState, Map<string, string>>;
 }
 
 export interface Runtime {
@@ -143,6 +149,8 @@ export interface Runtime {
     correctWatch: Handler<CorrectWatchCmd>;
     purgeUnregistered: Handler<GiveawayCmd, string[]>;
     recordAnnouncement: Handler<RecordAnnouncementCmd>;
+    /** Übernahme eines Giveaways (NEW_DESIGN.md 15), nur system:migration. */
+    importLegacy: Handler<ImportLegacyGiveawayCmd, Map<string, string>>;
   };
 }
 
@@ -157,6 +165,8 @@ export function createRuntime(o: RuntimeOptions): Runtime {
   projections.registerState(participantsProjector(kernels));
   projections.registerState(timersProjector(kernels));
   projections.registerState(teamsProjector());
+  projections.register(legacyImportsProjector());
+  projections.register(legacyTeamsProjector());
   const reducer = makeGiveawayReducer(kernels);
   const bus = new CommandBus({
     pool: o.pool,
@@ -172,6 +182,7 @@ export function createRuntime(o: RuntimeOptions): Runtime {
   const od = { ...d, legalSource: o.legalSource ?? noProfile, fetcher: o.fetcher ?? fetchHash, loadState };
   const activity = o.activity ?? noActivity;
   const teamAuth = o.teamAuth ?? allowAllTeams;
+  const identities = o.identities ?? noIdentities;
   return {
     kernels,
     registry,
@@ -191,6 +202,7 @@ export function createRuntime(o: RuntimeOptions): Runtime {
       ban: banParticipantHandler(teamAuth),
       unban: unbanParticipantHandler(teamAuth),
       revert: teamRevertHandler(registry, teamAuth),
+      importLegacy: importLegacyTeamHandler(identities),
     },
     handlers: {
       create: createGiveawayHandler(d),
@@ -209,12 +221,13 @@ export function createRuntime(o: RuntimeOptions): Runtime {
       draw: drawHandler(dd),
       redraw: redrawHandler(dd),
       setWinnerStatus: winnerStatusHandler(d),
-      applySignals: applySignalsHandler({ ...d, identities: o.identities ?? noIdentities, activity }),
+      applySignals: applySignalsHandler({ ...d, identities, activity }),
       startBoost: startBoostHandler({ ...d, activity }),
       stopBoost: stopBoostHandler(d),
       correctWatch: correctWatchHandler(d),
       recordAnnouncement: recordAnnouncementHandler(d),
       purgeUnregistered: purgeUnregisteredHandler(d),
+      importLegacy: importLegacyGiveawayHandler({ ...d, identities }),
     },
   };
 }

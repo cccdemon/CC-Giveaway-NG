@@ -18,6 +18,13 @@ export function registerTeamEvents(registry: EventTypeRegistry): void {
   });
 
   registry.register({
+    type: TEAM_EVENTS.imported,
+    version: 1,
+    schema: z.object({ legacyTeamId: z.string().min(1).max(100) }),
+    reversal: { kind: 'none', why: 'Die Übernahme bleibt im Nachweis. Deaktiviere das Team.' },
+  });
+
+  registry.register({
     type: TEAM_EVENTS.renamed,
     version: 1,
     schema: z.object({ before: name, after: name }),

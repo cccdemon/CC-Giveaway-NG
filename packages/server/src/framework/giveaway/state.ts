@@ -1,5 +1,5 @@
 // Zustand des Stroms giveaway:<id>. Rahmen-Felder hier, Kern-Zustand über kernel.reduce (F7). Rein und unveränderlich.
-import { FRAMEWORK_EVENTS, SERVICE_EVENTS, type AnyKernel, type CreditedPayload, type KernelEvent, type NewKernelEvent, type Pid } from '../../kernel-api/index.js';
+import { FRAMEWORK_EVENTS, SERVICE_EVENTS, type AnyKernel, type CreditedPayload, type KernelEvent, type LegacyImportedPayload, type NewKernelEvent, type Pid } from '../../kernel-api/index.js';
 import type { EventRecord, NewEvent, StreamId } from '../../journal/types.js';
 import type { StreamReducer } from '../command-bus.js';
 import type { KernelRegistry } from '../kernel-registry.js';
@@ -177,6 +177,18 @@ function applyFramework(kernels: KernelRegistry, s: GiveawayState, e: EventRecor
       const chatLast = { ...s.chatLast };
       for (const x of p.entries) chatLast[x.pid] = later(chatLast[x.pid], x.lastAt);
       return { ...s, seen: markSeen(s, p.channel, p.entries.map((x) => x.pid), at), chatLast };
+    }
+    case FRAMEWORK_EVENTS.legacyImported: {
+      // Übernahme (NEW_DESIGN.md 15.3): Zustand, Anmeldungen mit der Zustimmungsfassung aus diesem Ereignis, seen je Kanal mit Sekunden.
+      const p = e.payload as LegacyImportedPayload;
+      const legalEventId = p.terms === null ? s.legalEventId : e.id;
+      const registered = { ...s.registered };
+      for (const pid of p.registered) registered[pid] = { since: at, eventId: e.id, legalEventId };
+      const byChannel = new Map<Pid, Pid[]>();
+      for (const x of p.entries) byChannel.set(x.channel, [...(byChannel.get(x.channel) ?? []), x.pid]);
+      let seen = s.seen;
+      for (const [channel, pids] of byChannel) seen = markSeen({ ...s, seen }, channel, pids, at);
+      return { ...s, status: p.status, closedAt: p.status === 'closed' ? at : null, registered, legalEventId, seen };
     }
     case SERVICE_EVENT_TYPES.boostStarted: {
       const { factor, until } = e.payload as { factor: number; until: string };

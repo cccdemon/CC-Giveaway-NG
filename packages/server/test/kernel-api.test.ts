@@ -17,12 +17,13 @@ describe('kernel-api', () => {
       watchCredited: 'watch_credited',
       chatCredited: 'chat_credited',
       watchCorrected: 'watch_corrected',
+      legacyImported: 'legacy_imported',
     });
   });
 
   it('SERVICE_EVENTS names the framework events per service', () => {
     expect(SERVICE_EVENTS).toEqual({
-      watchtime: ['watch_credited', 'watch_corrected'],
+      watchtime: ['watch_credited', 'watch_corrected', 'legacy_imported'],
       chatBonus: ['chat_credited'],
       boost: [],
       registration: ['participant_registered', 'participant_withdrawn'],

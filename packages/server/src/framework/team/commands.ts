@@ -1,11 +1,13 @@
 // Befehle des Stroms team:<id> (NEW_DESIGN.md 9.3, 15.3, 15.9). Rechte liefert ein TeamAuthorizer, die Umsetzung über Konten liegt in identity.
 import type pg from 'pg';
 import type { Pid } from '../../kernel-api/index.js';
+import type { TwitchUser } from '../../identity/identities.js';
 import type { EventTypeRegistry } from '../../journal/event-types.js';
 import type { Actor } from '../../journal/types.js';
 import { reject, type Rejection } from '../../shared/rejection.js';
 import { INVALID_ID, UUID_RE, authorizeSelf, pidOfActor } from '../authorize.js';
 import type { CommandContext, CommandHandler } from '../command-bus.js';
+import type { IdentityResolver } from '../giveaway/signals.js';
 import { makeRevertHandler, type RevertCommand, type RevertPrepared } from '../revert.js';
 import { INVITE_TTL_DAYS, TEAM_EVENTS, TEAM_NAME_MAX, teamIdOfStream, teamReducer, teamStream, type TeamState } from './state.js';
 
@@ -43,6 +45,13 @@ export interface JoinTeamCmd extends InviteCmd {
 }
 export interface MemberCmd extends TeamCmd {
   pid: Pid;
+}
+/** Übernahme eines Mehrpersonen-Teams aus dem Altsystem (NEW_DESIGN.md 15.3). Twitch-Daten nur im Befehl. */
+export interface ImportLegacyTeamCmd extends TeamCmd {
+  legacyTeamId: string;
+  name: string;
+  members: TwitchUser[];
+  banned: TwitchUser[];
 }
 
 type Handler<C> = CommandHandler<C, TeamState>;
@@ -103,6 +112,36 @@ export function createTeamHandler(auth: TeamAuthorizer): Handler<CreateTeamCmd> 
         members = [founder];
       }
       return [{ type: TEAM_EVENTS.created, payload: { name, members } }];
+    },
+  };
+}
+
+const MIGRATION_ONLY = (): Rejection => reject('migration_only', 'Diesen Befehl führt nur die Übernahme aus.');
+
+export function importLegacyTeamHandler(identities: IdentityResolver): CommandHandler<ImportLegacyTeamCmd, TeamState, Map<string, Pid>> {
+  const usersOf = (cmd: ImportLegacyTeamCmd): TwitchUser[] => [...new Map([...cmd.members, ...cmd.banned].map((u) => [u.id, u])).values()];
+  return {
+    type: 'import_legacy_team',
+    streamOf: (cmd) => teamStream(cmd.teamId),
+    reducer: teamReducer,
+    authorize: (cmd, ctx) => (ctx.actor !== MIGRATION ? MIGRATION_ONLY() : isUuid(cmd.teamId) ? null : INVALID_ID()),
+    prepare: async (c, cmd, ctx, _pre, state) => (state.exists || !Array.isArray(cmd.members) || cmd.members.length === 0 ? new Map() : identities.create(c, usersOf(cmd), ctx.now)),
+    decide(state, cmd, _ctx, pids) {
+      if (state.exists) return reject('already_imported', 'Dieses Team ist schon übernommen.');
+      if (typeof cmd.legacyTeamId !== 'string' || !cmd.legacyTeamId.trim()) return reject('invalid_session', 'Die Alt-ID des Teams fehlt.');
+      const name = checkName(cmd.name);
+      if (typeof name !== 'string') return name;
+      if (!Array.isArray(cmd.members) || cmd.members.length === 0) return reject('members_required', 'Gib mindestens ein Mitglied an.');
+      const members = [...new Set(cmd.members.map((u) => pids.get(u.id)))];
+      if (members.some((pid) => pid === undefined)) return reject('unknown_participant', 'Ein Mitglied hat keine Identität.');
+      const banned = [...new Set((cmd.banned ?? []).map((u) => pids.get(u.id)))];
+      if (banned.some((pid) => pid === undefined)) return reject('unknown_participant', 'Eine gesperrte Person hat keine Identität.');
+      if (banned.some((pid) => members.includes(pid))) return reject('banned_member', 'Ein Mitglied kann nicht zugleich gesperrt sein.');
+      return [
+        { type: TEAM_EVENTS.created, payload: { name, members: (members as Pid[]).sort() } },
+        { type: TEAM_EVENTS.imported, payload: { legacyTeamId: cmd.legacyTeamId } },
+        ...(banned as Pid[]).sort().map((pid) => ({ type: TEAM_EVENTS.banned, payload: { pid } })),
+      ];
     },
   };
 }

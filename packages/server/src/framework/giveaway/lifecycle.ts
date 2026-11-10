@@ -96,7 +96,7 @@ const TEXT_MAX = 200;
 const INVALID_GATE = (): Rejection => reject('invalid_gate', 'Eine Bedingung ist ungültig.');
 
 /** Prüft vollständige Einstellungen gegen den Kern. Liefert sie mit geprüfter config zurück. */
-function checkSettings(kernel: AnyKernel, s: GiveawaySettings): GiveawaySettings | Rejection {
+export function checkSettings(kernel: AnyKernel, s: GiveawaySettings): GiveawaySettings | Rejection {
   const config = validateConfig(kernel.configSchema, s.config);
   if (isRejection(config)) return config;
   const announcements = validateAnnouncements(s.announcements, kernel);
@@ -267,8 +267,8 @@ export function changeSettingsHandler(d: GiveawayDeps): CommandHandler<ChangeSet
       // (volles Formular), der Kanal eines Ausgetretenen kommt aber nicht erneut hinein (Teilprojekt 7, Festlegung 5).
       if (s.channels !== undefined && outsideTeam(after.channels.filter((ch) => !before.channels.includes(ch)), team)) return CHANNEL_NOT_IN_TEAM();
       if (canonicalJson(after) === canonicalJson(before)) return [];
-      // Der eingefrorene Nachweis (9.4) darf nicht still von den sichtbaren Texten abweichen.
-      if (state.status !== 'draft' && canonicalJson(after.legal) !== canonicalJson(before.legal)) {
+      // Der eingefrorene Nachweis (9.4) darf nicht still von den sichtbaren Texten abweichen. Ein übernommenes Giveaway (15.4) hat noch keinen.
+      if (state.legal !== null && canonicalJson(after.legal) !== canonicalJson(before.legal)) {
         return reject('legal_locked', 'Die Rechtstexte sind seit dem Öffnen eingefroren. Für neue Texte lege ein neues Giveaway an.');
       }
       return [{ type: GIVEAWAY_EVENTS.settingsChanged, payload: { before, after } }];
