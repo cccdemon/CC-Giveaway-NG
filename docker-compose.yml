@@ -1,0 +1,199 @@
+# Produktion (NEW_DESIGN.md 3.1, 12.3): app, ingest, scheduler, web, PostgreSQL, Redis, Caddy, Backup.
+# Konfiguration aus .env (Vorlage .env.production.example), Schlüssel aus secrets/token.key. Nur Caddy hat einen Port.
+# Start: docker compose up -d --build · Übernahme: docker compose run --rm app node dist/migration/legacy/cli.js --file /import/<datei>
+name: ccg
+
+x-server-env: &server-env
+  NODE_ENV: production
+  DATABASE_URL: postgres://ccg:${PG_PASSWORD}@postgres:5432/ccg
+  REDIS_URL: redis://redis:6379
+  PORT: "3000"
+  LOG_LEVEL: ${LOG_LEVEL:-info}
+  TWITCH_CLIENT_ID: ${TWITCH_CLIENT_ID}
+  TWITCH_CLIENT_SECRET: ${TWITCH_CLIENT_SECRET}
+  PUBLIC_URL: https://${DOMAIN}
+  TOKEN_KEY_FILE: /run/secrets/token.key
+  INGEST_ADAPTER: ${INGEST_ADAPTER:-twitch}
+  INGEST_WORKERS: ${INGEST_WORKERS:-1}
+  INGEST_WORKER_INDEX: "0"
+  TWITCH_BOT_USER_ID: ${TWITCH_BOT_USER_ID:-}
+  ADMIN_TWITCH_IDS: ${ADMIN_TWITCH_IDS:-}
+  TZ: Europe/Berlin
+
+x-logging: &logging
+  driver: json-file
+  options: { max-size: "10m", max-file: "3" }
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ccg
+      POSTGRES_PASSWORD: ${PG_PASSWORD:?PG_PASSWORD in .env setzen}
+      POSTGRES_DB: ccg
+      TZ: Europe/Berlin
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ccg -d ccg"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    stop_grace_period: 30s
+    logging: *logging
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    logging: *logging
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ccg-server
+    restart: unless-stopped
+    command: ["node", "dist/app/main.js"]
+    environment: *server-env
+    secrets:
+      - token.key
+    volumes:
+      - ./import:/import:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    stop_grace_period: 30s
+    logging: *logging
+
+  ingest:
+    image: ccg-server
+    restart: unless-stopped
+    command: ["node", "dist/ingest/main.js"]
+    environment: *server-env
+    secrets:
+      - token.key
+    depends_on:
+      app:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f dist/ingest/main.js"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    stop_grace_period: 30s
+    logging: *logging
+
+  scheduler:
+    image: ccg-server
+    restart: unless-stopped
+    command: ["node", "dist/scheduler/main.js"]
+    environment: *server-env
+    secrets:
+      - token.key
+    depends_on:
+      app:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f dist/scheduler/main.js"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    stop_grace_period: 30s
+    logging: *logging
+
+  web:
+    build:
+      context: .
+      dockerfile: packages/web/Dockerfile
+    image: ccg-web
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      API_URL: http://app:3000
+      ORIGIN: https://${DOMAIN}
+      PROTOCOL_HEADER: x-forwarded-proto
+      HOST_HEADER: x-forwarded-host
+      ADDRESS_HEADER: x-forwarded-for
+      XFF_DEPTH: "1"
+      TZ: Europe/Berlin
+    depends_on:
+      app:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    logging: *logging
+
+  caddy:
+    build:
+      context: ./caddy
+    image: ccg-caddy
+    restart: unless-stopped
+    ports:
+      - "${CADDY_PORT:-9445}:443"
+    environment:
+      DOMAIN: ${DOMAIN:?DOMAIN in .env setzen}
+      CF_API_TOKEN: ${CF_API_TOKEN:-}
+      TZ: Europe/Berlin
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+      - ./caddy/${CADDY_CONFIG:-Caddyfile}:/etc/caddy/Caddyfile:ro
+    depends_on:
+      - app
+      - web
+    logging: *logging
+
+  backup:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGUSER: ccg
+      PGPASSWORD: ${PG_PASSWORD}
+      PGDATABASE: ccg
+      BACKUP_DIR: /backups
+      KEEP_DAYS: "30"
+      TZ: Europe/Berlin
+    volumes:
+      - backups:/backups
+      - ./backup:/backup:ro
+    command: ["sh", "-c", "crontab /backup/crontab && crond -f -l 8"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    logging: *logging
+
+secrets:
+  token.key:
+    file: ./secrets/token.key
+
+volumes:
+  pgdata:
+  redisdata:
+  backups:
+  caddy_data:
+  caddy_config:

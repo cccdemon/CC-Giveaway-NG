@@ -16,6 +16,7 @@ jobs:
       - run: npm run typecheck
       - run: npm run lint
       - run: npm test
+      - run: npm run build
       # E2E (NEW_DESIGN.md 12.2): Playwright gegen den Stack aus packages/web/e2e/stack.ts (PostgreSQL per Testcontainers, Twitch-Stub).
       - run: npx playwright install --with-deps chromium
         working-directory: packages/web
@@ -26,3 +27,7 @@ jobs:
           name: playwright-report
           path: packages/web/test-results
           retention-days: 7
+      # Betrieb (NEW_DESIGN.md 12.3): Images bauen und Compose-Datei prüfen, kein Deploy aus CI.
+      - run: docker build -f Dockerfile -t ccg-server .
+      - run: docker build -f packages/web/Dockerfile -t ccg-web .
+      - run: mkdir -p secrets && echo test > secrets/token.key && PG_PASSWORD=ci docker compose --env-file .env.production.example config -q

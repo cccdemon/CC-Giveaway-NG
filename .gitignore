@@ -4,3 +4,5 @@ dist/
 coverage/
 secrets/
 .svelte-kit/
+import/
+backups/
