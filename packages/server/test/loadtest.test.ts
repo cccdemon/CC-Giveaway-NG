@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { LOAD_START, P95_TARGET_MS, runLoadTest } from '../src/loadtest/run.js';
+import { LOAD_START, MINUTE_TARGET_MS, P95_TARGET_MS, runLoadTest } from '../src/loadtest/run.js';
 import { freshDb } from './helpers/db.js';
 
 let close: (() => Promise<void>) | undefined;
@@ -27,7 +27,10 @@ describe('Lasttest', () => {
     expect(r.rejected).toBe(0);
     expect(r.events).toBeGreaterThan(20);
     expect(r.wallMs).toBeGreaterThan(0);
-    expect(r.target).toEqual({ p95Ms: P95_TARGET_MS, ok: r.commands.apply_signals!.p95 < P95_TARGET_MS });
+    const p95Ok = Object.values(r.commands).every((s) => s.p95 < P95_TARGET_MS);
+    const minuteOk = r.perMinute.every((m) => m.ms < MINUTE_TARGET_MS);
+    expect(r.target).toEqual({ p95Ms: P95_TARGET_MS, minuteMs: MINUTE_TARGET_MS, p95Ok, minuteOk, ok: p95Ok && minuteOk });
+    expect(MINUTE_TARGET_MS).toBe(60_000);
     expect(LOAD_START.toISOString()).toBe('2026-10-15T12:00:00.000Z');
 
     const events = await db.pool.query<{ type: string; n: string }>('SELECT type, count(*)::int AS n FROM events GROUP BY type ORDER BY type');

@@ -31,3 +31,5 @@ jobs:
       - run: docker build -f Dockerfile -t ccg-server .
       - run: docker build -f packages/web/Dockerfile -t ccg-web .
       - run: mkdir -p secrets && echo test > secrets/token.key && PG_PASSWORD=ci docker compose --env-file .env.production.example config -q
+      - run: docker build -t ccg-caddy caddy
+      - run: for f in Caddyfile Caddyfile.local; do docker run --rm -v "$PWD/caddy/$f:/etc/caddy/Caddyfile:ro" -e DOMAIN=example.org -e CF_API_TOKEN=abcdefghijklmnopqrstuvwxyz0123456789ABCD ccg-caddy caddy validate --config /etc/caddy/Caddyfile; done

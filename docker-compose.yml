@@ -68,7 +68,8 @@ services:
     secrets:
       - token.key
     volumes:
-      - ./import:/import:ro
+      # Übernahme: Exportdateien hinein, Berichte heraus (Ordner gehört uid 1000, siehe docs/betrieb.md).
+      - ./import:/import
     depends_on:
       postgres:
         condition: service_healthy
@@ -94,12 +95,28 @@ services:
       app:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "pgrep -f dist/ingest/main.js"]
+      test: ["CMD", "pgrep", "-f", "dist/ingest/main.js"]
       interval: 30s
       timeout: 5s
       retries: 3
     stop_grace_period: 30s
     logging: *logging
+
+  # Zweiter Ingest-Worker (Lasttest: ab rund 1.000 Live-Kanälen). Einkommentieren und INGEST_WORKERS=2 in .env setzen.
+  # ingest-1:
+  #   image: ccg-server
+  #   restart: unless-stopped
+  #   command: ["node", "dist/ingest/main.js"]
+  #   environment:
+  #     <<: *server-env
+  #     INGEST_WORKER_INDEX: "1"
+  #   secrets:
+  #     - token.key
+  #   depends_on:
+  #     app:
+  #       condition: service_healthy
+  #   stop_grace_period: 30s
+  #   logging: *logging
 
   scheduler:
     image: ccg-server
@@ -112,7 +129,7 @@ services:
       app:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "pgrep -f dist/scheduler/main.js"]
+      test: ["CMD", "pgrep", "-f", "dist/scheduler/main.js"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -181,7 +198,14 @@ services:
     volumes:
       - backups:/backups
       - ./backup:/backup:ro
-    command: ["sh", "-c", "crontab /backup/crontab && crond -f -l 8"]
+    # Ein Backup sofort beim Start (jeder Deploy sichert), dann Cron. health.sh meldet veraltete oder fehlgeschlagene Backups.
+    command: ["sh", "-c", "sh /backup/backup.sh; crontab /backup/crontab && crond -f -l 8"]
+    healthcheck:
+      test: ["CMD", "sh", "/backup/health.sh"]
+      interval: 10m
+      timeout: 10s
+      retries: 1
+      start_period: 2m
     depends_on:
       postgres:
         condition: service_healthy

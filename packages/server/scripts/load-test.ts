@@ -9,6 +9,7 @@ import { ensurePartitions } from '../src/journal/partitions.js';
 import { LOAD_START, runLoadTest, type LoadResult } from '../src/loadtest/run.js';
 
 const { values } = parseArgs({
+  // DATABASE_URL kommt aus der Umgebung (z. B. export $(grep ^DATABASE_URL .env)). Ein abgebrochener Lauf lässt loadtest_<zeit> stehen: DROP DATABASE.
   options: {
     channels: { type: 'string', default: '1000' },
     viewers: { type: 'string', default: '200' },
@@ -60,7 +61,8 @@ async function main(): Promise<number> {
     console.log(table(r));
     console.log('');
     console.log(`Ereignisse: ${r.events}, abgelehnt: ${r.rejected}, fehlgeschlagen: ${r.failed}, Wanduhr: ${(r.wallMs / 1000).toFixed(1)} s`);
-    console.log(`Ziel: apply_signals p95 < ${r.target.p95Ms} ms → ${r.target.ok ? 'erreicht' : 'verfehlt'}`);
+    console.log(`Ziel p95 < ${r.target.p95Ms} ms je Befehl → ${r.target.p95Ok ? 'erreicht' : 'verfehlt'}; simulierte Minute < ${r.target.minuteMs / 1000} s Wanduhr → ${r.target.minuteOk ? 'erreicht' : 'verfehlt'}`);
+    console.log('Hinweis: Minute 1 bündelt noch nichts, die letzte Minute wird beim Stopp gebündelt (Zählung je Wanduhr-Minute).');
     return r.target.ok && r.failed === 0 ? 0 : 1;
   } finally {
     await pool.end();

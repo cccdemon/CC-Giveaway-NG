@@ -65,6 +65,34 @@ export async function upsertChannelStatus(db: Queryable, pid: Pid, patch: Channe
   await db.query(`INSERT INTO channel_status (${cols.join(', ')}) VALUES (${params.join(', ')}) ON CONFLICT (pid) DO UPDATE SET ${sets.join(', ')}`, values);
 }
 
+const COLUMN_TYPES: Record<string, string> = {
+  pid: 'uuid', updated_at: 'timestamptz', live: 'bool', viewers: 'int', chatters: 'int', last_signal_at: 'timestamptz',
+  last_presence_at: 'timestamptz', problem: 'text', worker: 'int', live_since: 'timestamptz',
+};
+
+/** Mehrere Kanäle mit derselben Spaltenmenge in einem Statement (unnest). Gleiche Regeln wie upsertChannelStatus. */
+export async function upsertChannelStatusMany(db: Queryable, entries: { pid: Pid; patch: ChannelStatusPatch }[], now: Date): Promise<void> {
+  if (entries.length === 0) return;
+  if (entries.length === 1) return upsertChannelStatus(db, entries[0]!.pid, entries[0]!.patch, now);
+  const first = entries[0]!.patch;
+  const cols: string[] = ['pid', 'updated_at'];
+  const columns: unknown[][] = [entries.map((e) => e.pid), entries.map(() => now)];
+  const sets: string[] = ['updated_at = EXCLUDED.updated_at'];
+  for (const [key, col] of Object.entries(COLUMNS) as [keyof typeof COLUMNS, string][]) {
+    if (first[key] === undefined) continue;
+    cols.push(col);
+    columns.push(entries.map((e) => e.patch[key] ?? null));
+    sets.push(`${col} = EXCLUDED.${col}`);
+  }
+  if (first.live !== undefined) {
+    cols.push('live_since');
+    columns.push(entries.map((e) => (e.patch.live ? (e.patch.liveSince ?? now) : null)));
+    sets.push('live_since = CASE WHEN EXCLUDED.live THEN (CASE WHEN channel_status.live THEN channel_status.live_since ELSE EXCLUDED.live_since END) ELSE NULL END');
+  }
+  const params = cols.map((c, i) => `$${i + 1}::${COLUMN_TYPES[c]}[]`);
+  await db.query(`INSERT INTO channel_status (${cols.join(', ')}) SELECT * FROM unnest(${params.join(', ')}) ON CONFLICT (pid) DO UPDATE SET ${sets.join(', ')}`, columns);
+}
+
 interface Row {
   pid: string;
   live: boolean;
@@ -104,10 +132,16 @@ export class StatusBuffer {
     this.pending.set(pid, { ...this.pending.get(pid), ...patch });
   }
 
+  /** Ein Statement je Spaltensignatur (Lasttest: sonst ein Upsert je Kanal und Takt). */
   async flush(db: Queryable, now: Date): Promise<number> {
     const entries = [...this.pending.entries()];
     this.pending.clear();
-    for (const [pid, patch] of entries) await upsertChannelStatus(db, pid, patch, now);
+    const groups = new Map<string, { pid: Pid; patch: ChannelStatusPatch }[]>();
+    for (const [pid, patch] of entries) {
+      const key = Object.keys(patch).filter((k) => patch[k as keyof ChannelStatusPatch] !== undefined).sort().join(',');
+      groups.set(key, [...(groups.get(key) ?? []), { pid, patch }]);
+    }
+    for (const group of groups.values()) await upsertChannelStatusMany(db, group, now);
     return entries.length;
   }
 }

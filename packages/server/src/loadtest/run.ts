@@ -5,11 +5,12 @@ import { performance } from 'node:perf_hooks';
 import type pg from 'pg';
 import type { BusLogger, CommandBus } from '../framework/command-bus.js';
 import { allowAll } from '../framework/giveaway/authorize.js';
-import { allActive } from '../framework/giveaway/signals.js';
 import type { LegalTexts } from '../framework/legal.js';
 import { InMemoryPublisher } from '../framework/publisher.js';
 import { createRuntime } from '../framework/runtime.js';
 import { identityResolver } from '../identity/resolver.js';
+import { pgBanDirectory, pgTeamDirectory } from '../identity/team-directory.js';
+import { pgChannelActivity } from '../ingest/channel-status.js';
 import { pgGiveawayLookup } from '../ingest/dispatch.js';
 import { SimulatorAdapter } from '../ingest/simulator.js';
 import { createIngestWorker } from '../ingest/worker.js';
@@ -34,14 +35,16 @@ export interface LoadResult {
   rejected: number;
   failed: number;
   perMinute: { minute: number; commands: number; ms: number }[];
-  target: { p95Ms: number; ok: boolean };
+  /** p95Ok: jeder gemessene Befehlstyp unter P95_TARGET_MS. minuteOk: jede simulierte Minute in unter einer Wanduhr-Minute (Erfolgskriterium 7). */
+  target: { p95Ms: number; minuteMs: number; p95Ok: boolean; minuteOk: boolean; ok: boolean };
 }
 
 /** Ziel aus NEW_DESIGN.md 12.2: unter 100 ms je Befehl im p95. */
 export const P95_TARGET_MS = 100;
+/** Ein Worker muss eine simulierte Minute in weniger als einer Wanduhr-Minute schaffen, sonst verliert er Anwesenheitsminuten. */
+export const MINUTE_TARGET_MS = 60_000;
 /** Feste Startzeit, damit Partitionen und Ergebnisse vergleichbar sind. */
 export const LOAD_START = new Date('2026-10-15T12:00:00.000Z');
-const MEASURED = 'apply_signals';
 const LEGAL: LegalTexts = { impressumUrl: 'https://last.example/impressum', terms: { text: 'Testregeln.' }, privacyUrl: 'https://last.example/datenschutz' };
 
 const silent: BusLogger = { error: (obj, msg) => console.error(JSON.stringify({ msg, ...obj })) };
@@ -57,7 +60,9 @@ export async function runLoadTest(o: LoadOptions): Promise<LoadResult> {
 
   const rt = createRuntime({
     pool: o.pool, publisher: new InMemoryPublisher(), auth: allowAll, log, legalSource: { profileOf: async () => LEGAL },
-    fetcher: async (url) => ({ ok: true, hash: `h:${url}` }), identities: identityResolver(), activity: allActive,
+    // Dieselben Lesezugriffe wie der Prozess ingest: Kanalaktivität, Team-Kanäle, Sperren aus den Lesetabellen.
+    fetcher: async (url) => ({ ok: true, hash: `h:${url}` }), identities: identityResolver(), activity: pgChannelActivity(),
+    teamDirectory: pgTeamDirectory(), bans: pgBanDirectory(),
   });
   // Jede Ausführung messen, auch die des Dispatchers. Der Bus bleibt der einzige Schreibweg.
   const bus = rt.bus as { execute: CommandBus['execute'] };
@@ -131,7 +136,8 @@ export async function runLoadTest(o: LoadOptions): Promise<LoadResult> {
   const events = Number((await o.pool.query('SELECT count(*)::int AS n FROM events')).rows[0]!.n);
   const commands: Record<string, Summary> = {};
   for (const [type, list] of durations) commands[type] = summarize(list);
-  const p95 = commands[MEASURED]?.p95 ?? 0;
+  const p95Ok = Object.values(commands).every((s) => s.p95 < P95_TARGET_MS);
+  const minuteOk = perMinute.every((m) => m.ms < MINUTE_TARGET_MS);
   return {
     config: { channels: o.channels, viewers: o.viewers, minutes: o.minutes, seed },
     wallMs: performance.now() - startedAt,
@@ -140,6 +146,6 @@ export async function runLoadTest(o: LoadOptions): Promise<LoadResult> {
     rejected,
     failed,
     perMinute,
-    target: { p95Ms: P95_TARGET_MS, ok: p95 < P95_TARGET_MS },
+    target: { p95Ms: P95_TARGET_MS, minuteMs: MINUTE_TARGET_MS, p95Ok, minuteOk, ok: p95Ok && minuteOk },
   };
 }

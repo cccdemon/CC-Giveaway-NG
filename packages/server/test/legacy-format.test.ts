@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { BACKUP_VERSION, LegacyFormatError, checkSums, loginsOf, parseBackup } from '../src/migration/legacy/format.js';
+import { parseCliArgs } from '../src/migration/legacy/args.js';
 import { giveawayIdOf, soloTeamIdOf, teamIdOf } from '../src/migration/legacy/ids.js';
 import { helixLoginResolver } from '../src/migration/legacy/resolve.js';
 import { uuidV5 } from '../src/shared/uuid.js';
@@ -57,6 +58,13 @@ describe('Export v2 lesen', () => {
 
   it('loginsOf collects members, channels, participants and banned logins lowercase and unique', () => {
     expect(loginsOf(fixture())).toEqual(['ghost_9', 'kanal_b', 'kanal_c', 'nobody_0', 'streamer_a', 'streamer_b', 'troll_t', 'viewer_1', 'viewer_2', 'viewer_3', 'viewer_4']);
+  });
+
+  it('parseCliArgs reads --file, --dry-run and --report (default next to the file) and rejects a missing file', () => {
+    expect(parseCliArgs(['--file', '/import/t.json'])).toEqual({ file: '/import/t.json', dryRun: false, report: '/import/t.json.bericht.txt' });
+    expect(parseCliArgs(['--file', '/import/t.json', '--dry-run', '--report', '/tmp/b.txt'])).toEqual({ file: '/import/t.json', dryRun: true, report: '/tmp/b.txt' });
+    expect(() => parseCliArgs([])).toThrow('Die Datei fehlt');
+    expect(() => parseCliArgs(['--file', 'x', '--foo'])).toThrow();
   });
 
   it('uuidV5 matches the RFC 4122 example and ids are stable for the same legacy id', () => {

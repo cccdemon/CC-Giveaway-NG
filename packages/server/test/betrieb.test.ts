@@ -11,6 +11,9 @@ const webImage = root('packages/web/Dockerfile');
 const caddyImage = root('caddy/Dockerfile');
 const ci = root('.github/workflows/ci.yml');
 const envExample = root('.env.production.example');
+const runbook = root('docs/betrieb.md');
+/** Compose ohne Kommentarzeilen (ingest-1 ist als Vorlage auskommentiert). */
+const composeCode = compose.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
 
 /** Block eines Dienstes aus der Compose-Datei (bis zum nächsten Dienst auf derselben Einrückung). */
 function service(name: string): string {
@@ -49,10 +52,18 @@ describe('Betrieb', () => {
     expect(service('postgres')).toMatch(/pg_isready/);
     expect(service('redis')).toMatch(/appendonly yes/);
     expect(compose).toMatch(/secrets:\n  token\.key:\n    file: \.\/secrets\/token\.key/);
-    expect(service('app')).toMatch(/\.\/import:\/import/);
+    expect(service('app')).toMatch(/\.\/import:\/import\n/);
+    // Zweiter Worker als Vorlage mit Merge-Syntax, damit INGEST_WORKER_INDEX überschreibbar ist.
+    expect(compose).toMatch(/#\s+ingest-1:/);
+    expect(compose).toMatch(/#\s+<<: \*server-env/);
+    expect(compose).toMatch(/#\s+INGEST_WORKER_INDEX: "1"/);
+    expect(service('ingest')).toMatch(/\["CMD", "pgrep", "-f", "dist\/ingest\/main\.js"\]/);
+    expect(service('backup')).toMatch(/healthcheck:/);
+    expect(service('backup')).toMatch(/health\.sh/);
+    expect(service('backup')).toMatch(/sh \/backup\/backup\.sh/);
     // Jeder Dienst startet neu und rotiert seine Logs.
-    expect((compose.match(/restart: unless-stopped/g) ?? []).length).toBe(8);
-    expect((compose.match(/logging: \*logging/g) ?? []).length).toBe(8);
+    expect((composeCode.match(/restart: unless-stopped/g) ?? []).length).toBe(8);
+    expect((composeCode.match(/logging: \*logging/g) ?? []).length).toBe(8);
     expect(compose).toMatch(/max-size/);
   });
 
@@ -67,7 +78,9 @@ describe('Betrieb', () => {
       expect(file).toMatch(/Strict-Transport-Security/);
       expect(file).toMatch(/X-Content-Type-Options nosniff/);
       expect(file).toMatch(/Content-Security-Policy/);
-      expect(file).toMatch(/order rate_limit before/);
+      expect(file).toMatch(/order rate_limit before basic_auth/);
+      expect(file).toMatch(/\n\s+log \{/);
+      expect(file).not.toMatch(/basicauth\b/);
     }
     expect(caddy).toMatch(/acme_dns cloudflare \{env\.CF_API_TOKEN\}/);
     expect(caddy).toMatch(/\{\$DOMAIN\} \{/);
@@ -90,6 +103,14 @@ describe('Betrieb', () => {
     expect(ci).toMatch(/docker build -f Dockerfile/);
     expect(ci).toMatch(/docker build -f packages\/web\/Dockerfile/);
     expect(ci).toMatch(/docker compose --env-file \.env\.production\.example config/);
+    expect(ci).toMatch(/docker build -t ccg-caddy caddy/);
+    expect(ci).toMatch(/caddy validate/);
+    // Runbook: der Schlüssel muss für den Nutzer node lesbar sein, der Bericht landet in einem beschreibbaren Ordner.
+    expect(runbook).not.toMatch(/chmod 600 secrets\/token\.key/);
+    expect(runbook).toMatch(/chmod 444 secrets\/token\.key/);
+    expect(runbook).toMatch(/chown 1000:1000 import/);
+    expect(runbook).not.toMatch(/RUN_SCHEDULER=false/);
+    expect(runbook).toMatch(/pg_restore --exit-on-error/);
     for (const key of ['DOMAIN', 'CADDY_PORT', 'CADDY_CONFIG', 'CF_API_TOKEN', 'PG_PASSWORD', 'TWITCH_CLIENT_ID', 'TWITCH_CLIENT_SECRET', 'TWITCH_BOT_USER_ID', 'ADMIN_TWITCH_IDS', 'INGEST_ADAPTER', 'INGEST_WORKERS', 'LOG_LEVEL']) {
       expect(envExample).toMatch(new RegExp(`^${key}=`, 'm'));
     }

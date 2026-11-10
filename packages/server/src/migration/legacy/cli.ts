@@ -1,8 +1,7 @@
-// Werkzeug migrate-legacy (NEW_DESIGN.md 15.6): npm run migrate-legacy -- --file <pfad> [--dry-run]
+// Werkzeug migrate-legacy (NEW_DESIGN.md 15.6): npm run migrate-legacy -- --file <pfad> [--dry-run] [--report <pfad>]
 // Liest nur die Datei, löst Logins per Helix auf, schreibt über die Runtime mit Akteur system:migration, legt den Bericht neben die Datei.
 // Exit-Codes: 0 fertig, 1 Abbruch vor dem Schreiben (Datei, Version, Kontrollsumme, Twitch), 2 Lauf mit Fehlern.
 import { readFile, writeFile } from 'node:fs/promises';
-import { parseArgs } from 'node:util';
 import { Redis } from 'ioredis';
 import { ConfigError, loadConfig } from '../../config/config.js';
 import { runMigrations } from '../../db/migrate.js';
@@ -20,12 +19,11 @@ import { pgBanDirectory, pgTeamDirectory } from '../../identity/team-directory.j
 import { appTokenSource, helixClient } from '../../ingest/twitch/helix.js';
 import { noAdmins } from '../../platform/admin.js';
 import { attachPlatform } from '../../platform/runtime.js';
+import { parseCliArgs } from './args.js';
 import { LegacyFormatError, parseBackup } from './format.js';
-import { renderReport, reportPathOf } from './report.js';
+import { renderReport } from './report.js';
 import { helixLoginResolver } from './resolve.js';
 import { runImport } from './run.js';
-
-const USAGE = 'Aufruf: npm run migrate-legacy -- --file <pfad> [--dry-run]';
 
 const log: BusLogger = {
   error: (obj, msg) => {
@@ -34,14 +32,8 @@ const log: BusLogger = {
   },
 };
 
-export function parseCliArgs(argv: string[]): { file: string; dryRun: boolean } {
-  const { values } = parseArgs({ args: argv, options: { file: { type: 'string' }, 'dry-run': { type: 'boolean', default: false } }, strict: true });
-  if (!values.file) throw new Error(`Die Datei fehlt. ${USAGE}`);
-  return { file: values.file, dryRun: values['dry-run'] === true };
-}
-
 async function main(): Promise<number> {
-  const { file, dryRun } = parseCliArgs(process.argv.slice(2));
+  const { file, dryRun, report: reportPath } = parseCliArgs(process.argv.slice(2));
   let text: string;
   try {
     text = await readFile(file, 'utf8');
@@ -82,9 +74,14 @@ async function main(): Promise<number> {
     const at = now();
     const result = await runImport(backup, { pool, rt, accounts, resolver: helixLoginResolver(helix), dryRun, now, log });
     const report = renderReport(file, dryRun, at, result);
-    await writeFile(reportPathOf(file), report, 'utf8');
+    // Erst die Konsole: ist der Zielordner nicht beschreibbar, geht der Bericht trotzdem nicht verloren.
     console.log(report);
-    console.log(`Bericht: ${reportPathOf(file)}`);
+    try {
+      await writeFile(reportPath, report, 'utf8');
+      console.log(`Bericht: ${reportPath}`);
+    } catch (e) {
+      console.error(`Der Bericht ließ sich nicht nach ${reportPath} schreiben (${e instanceof Error ? e.message : String(e)}). Er steht oben auf der Konsole; nutze --report <pfad>.`);
+    }
     if (result.aborted) return 1;
     return result.failed > 0 ? 2 : 0;
   } finally {
@@ -94,8 +91,10 @@ async function main(): Promise<number> {
 }
 
 main()
-  .then((code) => process.exit(code))
+  .then((code) => {
+    process.exitCode = code;
+  })
   .catch((e) => {
-    console.error(e instanceof ConfigError ? e.message : e);
-    process.exit(1);
+    console.error(e instanceof ConfigError || e instanceof Error ? e.message : e);
+    process.exitCode = 1;
   });

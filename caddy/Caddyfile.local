@@ -3,12 +3,17 @@
 {
     admin off
     auto_https disable_redirects
-    order rate_limit before basicauth
+    order rate_limit before basic_auth
 }
 
 {$DOMAIN} {
     tls internal
     encode gzip
+    # Zugriffslog nach stdout (docker compose logs caddy): zeigt auch, welche Adresse Caddy als Client sieht (Ratelimit je Adresse).
+    log {
+        output stdout
+        format json
+    }
 
     header {
         Strict-Transport-Security "max-age=31536000"
@@ -16,7 +21,7 @@
         X-Frame-Options DENY
         Referrer-Policy strict-origin-when-cross-origin
         Permissions-Policy "camera=(), microphone=(), geolocation=()"
-        Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://static-cdn.jtvnw.net; font-src 'self'; connect-src 'self' wss:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'"
+        Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://static-cdn.jtvnw.net; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'"
         -Server
     }
 

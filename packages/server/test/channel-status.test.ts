@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { withTx } from '../src/db/pool.js';
 import { findIdentity, touchIdentities, upsertIdentity } from '../src/identity/identities.js';
 import { loadChannelToken, saveChannelToken, updateChannelToken } from '../src/identity/tokens.js';
@@ -74,6 +74,27 @@ describe('channel_status', () => {
     const rows = await readChannelStatus(db.pool, [PID, PID2]);
     expect(rows.get(PID)).toMatchObject({ viewers: 2, chatters: 5, problem: 'twitch_error' });
     expect(rows.get(PID2)).toMatchObject({ live: true, liveSince: AT });
+  });
+
+  it('StatusBuffer.flush writes one statement per column signature, not one per pid', async () => {
+    const db = await freshDb();
+    close = db.close;
+    const buf = new StatusBuffer();
+    const pids = Array.from({ length: 50 }, (_, i) => `${i.toString(16).padStart(8, '0')}-0000-4000-8000-000000000000`);
+    for (const [i, pid] of pids.entries()) buf.note(pid, i % 2 === 0 ? { lastSignalAt: AT, chatters: i } : { live: true, viewers: i });
+    const spy = vi.spyOn(db.pool, 'query');
+    expect(await buf.flush(db.pool, AT)).toBe(50);
+    expect(spy.mock.calls.length).toBeLessThanOrEqual(2);
+    const rows = await readChannelStatus(db.pool, pids);
+    expect(rows.size).toBe(50);
+    expect(rows.get(pids[0]!)).toMatchObject({ chatters: 0, lastSignalAt: AT, live: false });
+    expect(rows.get(pids[1]!)).toMatchObject({ live: true, viewers: 1, liveSince: AT });
+    // Zweiter Durchlauf: live bleibt, live_since bleibt, Werte ändern sich nur, wo gepatcht.
+    for (const pid of pids) buf.note(pid, { live: true, viewers: 7 });
+    await buf.flush(db.pool, new Date(AT.getTime() + 60_000));
+    const again = await readChannelStatus(db.pool, pids);
+    expect(again.get(pids[1]!)).toMatchObject({ live: true, viewers: 7, liveSince: AT });
+    expect(again.get(pids[0]!)).toMatchObject({ live: true, viewers: 7, chatters: 0, liveSince: new Date(AT.getTime() + 60_000) });
   });
 
   it('channelStatusView joins accounts, tokens and status and computes coverage', async () => {
