@@ -130,9 +130,9 @@ export interface Runtime {
     create: Handler<CreateGiveawayCmd, TeamChannels>;
     open: Handler<GiveawayCmd, OpenPrepared, OpenPre>;
     pause: Handler<GiveawayCmd>;
-    resume: Handler<GiveawayCmd>;
+    resume: Handler<GiveawayCmd, OpenPrepared, OpenPre>;
     close: Handler<GiveawayCmd>;
-    reopen: Handler<GiveawayCmd>;
+    reopen: Handler<GiveawayCmd, OpenPrepared, OpenPre>;
     cancel: Handler<GiveawayCmd>;
     complete: Handler<GiveawayCmd>;
     changeSettings: Handler<ChangeSettingsCmd, TeamChannels>;
@@ -208,9 +208,9 @@ export function createRuntime(o: RuntimeOptions): Runtime {
       create: createGiveawayHandler(d),
       open: openGiveawayHandler(od),
       pause: transitionHandler(d, 'pause_giveaway'),
-      resume: transitionHandler(d, 'resume_giveaway'),
+      resume: openGiveawayHandler(od, 'resume_giveaway'),
       close: transitionHandler(d, 'close_giveaway'),
-      reopen: transitionHandler(d, 'reopen_giveaway'),
+      reopen: openGiveawayHandler(od, 'reopen_giveaway'),
       cancel: transitionHandler(d, 'cancel_giveaway'),
       complete: transitionHandler(d, 'complete_giveaway'),
       changeSettings: changeSettingsHandler(d),

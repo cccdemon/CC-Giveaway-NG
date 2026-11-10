@@ -11,6 +11,7 @@ import { accountAuthorizer, accountTeamAuthorizer } from '../src/identity/accoun
 import { pgBanDirectory, pgTeamDirectory } from '../src/identity/team-directory.js';
 import { allAdmins } from '../src/platform/admin.js';
 import { ALICE, BOB, connect, login, setupApi, type ApiSetup } from './helpers/api.js';
+import { identityResolver } from '../src/identity/resolver.js';
 
 let s: ApiSetup | undefined;
 afterEach(async () => {
@@ -41,7 +42,7 @@ function gateStub() {
 
 async function setup() {
   const gates = gateStub();
-  s = await setupApi({ gates: gates.checker });
+  s = await setupApi({ gates: gates.checker, identities: identityResolver() });
   return { api: s, gates };
 }
 
@@ -152,6 +153,32 @@ describe('Portal-API', () => {
     expect(won.lastGateResult).toEqual({ ok: true, reasons: [] });
     expect(won.winner).toEqual({ status: 'pending', claimDeadline: new Date(AT.getTime() + 14 * 86_400_000).toISOString(), contact: 'Discord: alice' });
     expect((await get(api, '/api/portal/giveaways', bob.cookie)).json()[0]).toMatchObject({ status: 'drawn', winnerStatus: 'pending' });
+  });
+
+  it('detail returns consent: the version the participant agreed to, from the frozen texts or from the import; null without registration', async () => {
+    const { api } = await setup();
+    const alice = await complete(api, ALICE);
+    await openInstant(api, alice, GID_A);
+    const [, importEvent] = await must(
+      api, api.rt.handlers.importLegacy,
+      {
+        giveawayId: GID_B, teamId: alice.soloTeamId, legacySessionId: 'sess_9', prize: 'Box', sponsor: null, keyword: null, coinBaseSec: 7200, followMin: 0,
+        chatBonus: { enabled: true, sec: 2, minWords: 4, cooldownSec: 10 }, channels: [ALICE], status: 'paused', terms: { version: 3, text: 'Alte Fassung 3.' },
+        participants: [{ user: BOB, registered: true, perChannel: { [ALICE.id]: 600 } }],
+      },
+      'system:migration',
+    );
+    const bob = await complete(api, BOB);
+    const before = (await get(api, `/api/portal/giveaways/${GID_A}`, bob.cookie)).json();
+    expect(before.consent).toBeNull();
+    await post(api, `/api/portal/giveaways/${GID_A}/register`, bob.cookie);
+    const frozen = (await get(api, `/api/portal/giveaways/${GID_A}`, bob.cookie)).json();
+    expect(frozen.consent).toEqual({ at: AT.toISOString(), terms: { text: 'Testregeln.' } });
+    const legacy = (await get(api, `/api/portal/giveaways/${GID_B}`, bob.cookie)).json();
+    expect(legacy.status).toBe('paused');
+    expect(legacy.legalEventId).toBe(importEvent!.id);
+    expect(legacy.consent).toEqual({ at: AT.toISOString(), terms: { text: 'Alte Fassung 3.' } });
+    expect(legacy.legal).toEqual({ impressumUrl: null, terms: { text: 'Alte Fassung 3.' }, privacyUrl: null });
   });
 
   it('detail of an open giveaway without participation works, of a closed one → 404', async () => {

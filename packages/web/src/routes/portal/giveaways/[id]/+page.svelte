@@ -10,6 +10,7 @@
   import TicketForm from '#lib/components/TicketForm.svelte';
   import ViewerLines from '#lib/components/ViewerLines.svelte';
   import { date, percent } from '#lib/format.js';
+  import { legalView } from '#lib/legal-view.js';
   import { watchStreams } from '#lib/live.js';
   import { L } from '#lib/texts/labels.js';
   import { S } from '#lib/texts/sentences.js';
@@ -27,6 +28,9 @@
   const participantCommands = $derived(d.kernel.commands.filter((c) => c.issuer === 'participant'));
   const refresh = () => invalidate(dep);
   const running = $derived(d.status === 'open' || d.status === 'paused' || d.status === 'closed');
+  // Zugestimmte Fassung nur zeigen, wenn sie vom aktuellen Text abweicht (NEW_DESIGN.md 15.4).
+  const consentText = $derived(d.consent?.terms && 'text' in d.consent.terms && d.consent.terms.text !== legalView(d.legal).termsText ? d.consent.terms.text : null);
+  const consentUrl = $derived(d.consent?.terms && 'url' in d.consent.terms && d.consent.terms.url !== legalView(d.legal).termsUrl ? d.consent.terms.url : null);
 
   $effect(() => watchStreams([`giveaway:${d.id}`]));
 
@@ -120,6 +124,17 @@
     <div class="stack">
       <span class="lbl">{L.legal.title}</span>
       <LegalLinks legal={d.legal} />
+      {#if d.consent}
+        <span class="hint">{S.portal.version(date(d.consent.at))}</span>
+        {#if consentText}
+          <details>
+            <summary>{L.portal.consentedTerms}</summary>
+            <p class="terms">{consentText}</p>
+          </details>
+        {:else if consentUrl}
+          <a href={consentUrl} target="_blank" rel="noopener">{L.portal.consentedTerms}</a>
+        {/if}
+      {/if}
     </div>
   </section>
 </div>
@@ -158,5 +173,13 @@
   .big {
     font-size: 2.125rem;
     line-height: 1.15;
+  }
+  .terms {
+    white-space: pre-wrap;
+    margin-top: 8px;
+    font-size: 0.875rem;
+  }
+  summary {
+    cursor: pointer;
   }
 </style>

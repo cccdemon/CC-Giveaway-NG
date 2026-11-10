@@ -350,6 +350,7 @@ export const L = {
     claimUntil: 'Meldefrist bis',
     contact: 'Kontaktweg',
     legalVersion: 'Fassung',
+    consentedTerms: 'Zugestimmte Fassung',
     chat: 'im Chat',
     byStreamer: 'von',
   },

@@ -8,7 +8,9 @@ import { checkLegal, fetchHash, mergeLegal, missingLegal, type LegalFetcher, typ
 import { accountLegalSource } from '../src/identity/account/legal-source.js';
 import { attachAccounts } from '../src/identity/runtime.js';
 import { readStream } from '../src/journal/journal.js';
-import { GID, P1, STREAMER, TEAM, createOpen, must, run, setupGiveaway, state } from './helpers/giveaway.js';
+import { GID, GID2, P1, STREAMER, TEAM, createOpen, must, run, setupGiveaway, state } from './helpers/giveaway.js';
+import type { ImportLegacyGiveawayCmd } from '../src/framework/giveaway/legacy.js';
+import { identityResolver } from '../src/identity/resolver.js';
 
 let close: (() => Promise<void>) | undefined;
 afterEach(async () => {
@@ -218,5 +220,70 @@ describe('fetchHash', () => {
   it('gives up after the timeout', async () => {
     const base = await serve(() => undefined);
     expect(await fetchHash(`${base}/haengt`, { timeoutMs: 200, allowPrivate: true })).toEqual({ ok: false });
+  });
+});
+
+describe('Fortsetzen und Wiederöffnen frieren Rechtstexte ein (Übernahme, NEW_DESIGN.md 15.4)', () => {
+  const MIG = { actor: 'system:migration' };
+  const A = { id: '1001', login: 'streamer_a', displayName: 'Streamer_A' };
+  const V1 = { id: '2001', login: 'viewer_1', displayName: 'Viewer_1' };
+  const imported = (over: Partial<ImportLegacyGiveawayCmd> = {}): ImportLegacyGiveawayCmd => ({
+    giveawayId: GID, teamId: TEAM, legacySessionId: 'sess_1', prize: 'Box', sponsor: null, keyword: null, coinBaseSec: 7200, followMin: 0,
+    chatBonus: { enabled: true, sec: 2, minWords: 4, cooldownSec: 10 }, channels: [A], status: 'paused', terms: { version: 3, text: 'Fassung 3.' },
+    participants: [{ user: V1, registered: true, perChannel: { [A.id]: 600 } }],
+    ...over,
+  });
+
+  it('resume of an imported giveaway without legal rejects legal_required; legal stays editable; with texts it freezes and opens; a later resume writes only the transition', async () => {
+    const fetcher = stubFetcher({ 'https://s.example/impressum': 'h-imp', 'https://s.example/datenschutz': 'h-ds' });
+    const s = await setupGiveaway({ legalSource: { profileOf: async () => null }, fetcher, identities: identityResolver() });
+    close = s.close;
+    const [, imp] = await must(s.rt, s.rt.handlers.importLegacy, imported(), MIG);
+    const r = await run(s.rt, s.rt.handlers.resume, { giveawayId: GID });
+    expect(r).toEqual({ ok: false, rejection: { rejected: true, code: 'legal_required', message: 'Hinterlege zuerst: Impressum, Datenschutzhinweis.' } });
+    expect((await state(s.rt)).status).toBe('paused');
+    // Noch nichts eingefroren: die Rechtstexte sind änderbar (Festlegung 6).
+    expect(codeOf(await run(s.rt, s.rt.handlers.changeSettings, { giveawayId: GID, settings: { legal: { impressumUrl: 'https://s.example/impressum', terms: { text: 'Fassung 3.' }, privacyUrl: 'https://s.example/datenschutz' } } }))).toBe('ok');
+    const events = await must(s.rt, s.rt.handlers.resume, { giveawayId: GID });
+    expect(events.map((e) => [e.type, e.payload])).toEqual([
+      [GIVEAWAY_EVENTS.legalFrozen, { impressum: { url: 'https://s.example/impressum', hash: 'h-imp' }, terms: { text: 'Fassung 3.' }, privacy: { url: 'https://s.example/datenschutz', hash: 'h-ds' }, frozenAt: '2026-10-15T12:00:00.000Z' }],
+      [GIVEAWAY_EVENTS.statusChanged, { from: 'paused', to: 'open' }],
+    ]);
+    const st = await state(s.rt);
+    expect(st.status).toBe('open');
+    expect(st.legalEventId).toBe(events[0]!.id);
+    // Übernommene Anmeldungen behalten ihre Fassung (Entscheidung 15 in NEW_DESIGN.md 13).
+    expect(Object.values(st.registered).map((x) => x.legalEventId)).toEqual([imp!.id]);
+    expect(codeOf(await run(s.rt, s.rt.handlers.changeSettings, { giveawayId: GID, settings: { legal: { impressumUrl: 'https://s.example/impressum', terms: { text: 'Anders.' }, privacyUrl: 'https://s.example/datenschutz' } } }))).toBe('legal_locked');
+    const fetched = fetcher.calls.length;
+    await must(s.rt, s.rt.handlers.pause, { giveawayId: GID });
+    const again = await must(s.rt, s.rt.handlers.resume, { giveawayId: GID });
+    expect(again.map((e) => e.type)).toEqual([GIVEAWAY_EVENTS.statusChanged]);
+    expect(fetcher.calls).toHaveLength(fetched);
+    expect(codeOf(await run(s.rt, s.rt.handlers.resume, { giveawayId: GID }))).toBe('invalid_transition');
+  });
+
+  it('reopen of an imported closed giveaway takes the profile texts, freezes and opens; a normal giveaway resumes without fetching', async () => {
+    const fetcher = stubFetcher({ 'https://p/i': 'h-i', 'https://p/t': 'h-t', 'https://p/d': 'h-d', 'https://s.example/impressum': 'h', 'https://s.example/datenschutz': 'h' });
+    const profile: LegalTexts = { impressumUrl: 'https://p/i', terms: { url: 'https://p/t' }, privacyUrl: 'https://p/d' };
+    const s = await setupGiveaway({ legalSource: { profileOf: async () => profile }, fetcher, identities: identityResolver() });
+    close = s.close;
+    await must(s.rt, s.rt.handlers.importLegacy, imported({ giveawayId: GID2, legacySessionId: 'sess_2', status: 'closed', terms: null }), MIG);
+    expect(codeOf(await run(s.rt, s.rt.handlers.resume, { giveawayId: GID2 }))).toBe('invalid_transition');
+    const events = await must(s.rt, s.rt.handlers.reopen, { giveawayId: GID2 });
+    expect(events.map((e) => [e.type, e.payload])).toEqual([
+      [GIVEAWAY_EVENTS.legalFrozen, { impressum: { url: 'https://p/i', hash: 'h-i' }, terms: { url: 'https://p/t', hash: 'h-t' }, privacy: { url: 'https://p/d', hash: 'h-d' }, frozenAt: '2026-10-15T12:00:00.000Z' }],
+      [GIVEAWAY_EVENTS.statusChanged, { from: 'closed', to: 'open' }],
+    ]);
+    expect((await state(s.rt, GID2)).status).toBe('open');
+
+    await must(s.rt, s.rt.handlers.create, { giveawayId: GID, teamId: TEAM, kernelId: 'instant', settings: { prize: 'Key', channels: [P1], legal: FULL } });
+    await must(s.rt, s.rt.handlers.open, { giveawayId: GID });
+    const fetched = fetcher.calls.length;
+    await must(s.rt, s.rt.handlers.pause, { giveawayId: GID });
+    expect((await must(s.rt, s.rt.handlers.resume, { giveawayId: GID })).map((e) => e.type)).toEqual([GIVEAWAY_EVENTS.statusChanged]);
+    await must(s.rt, s.rt.handlers.close, { giveawayId: GID });
+    expect((await must(s.rt, s.rt.handlers.reopen, { giveawayId: GID })).map((e) => e.type)).toEqual([GIVEAWAY_EVENTS.statusChanged]);
+    expect(fetcher.calls).toHaveLength(fetched);
   });
 });

@@ -4,10 +4,11 @@ import type pg from 'pg';
 import { UUID_RE } from '../framework/authorize.js';
 import { GIVEAWAY_NOT_FOUND } from '../framework/giveaway/authorize.js';
 import { GateCheckError, type GateConfig } from '../framework/giveaway/gates.js';
-import type { GiveawayState, WinnerStatus } from '../framework/giveaway/state.js';
+import { GIVEAWAY_EVENTS, type GiveawayState, type WinnerStatus } from '../framework/giveaway/state.js';
+import type { FrozenLegal } from '../framework/legal.js';
 import { displayNamesOf, displayNameOf } from '../identity/identities.js';
 import { readEvent } from '../journal/journal.js';
-import type { Pid, ViewerView } from '../kernel-api/index.js';
+import { FRAMEWORK_EVENTS, type LegacyImportedPayload, type Pid, type ViewerView } from '../kernel-api/index.js';
 import { reject } from '../shared/rejection.js';
 import type { ApiDeps } from './auth.js';
 import { bodyOf, executeAs } from './commands.js';
@@ -45,6 +46,24 @@ interface ParticipationRow {
 }
 
 const DAY_MS = 86_400_000;
+
+type ConsentTerms = { text: string } | { url: string } | null;
+
+/** Die Fassung, der die Person zugestimmt hat (NEW_DESIGN.md 6.4, 15.4): aus dem eingefrorenen Nachweis oder aus der Übernahme. */
+async function consentOf(c: pg.PoolClient, deps: ApiDeps, state: GiveawayState, pid: Pid): Promise<{ at: string; terms: ConsentTerms } | null> {
+  const reg = state.registered[pid];
+  if (!reg) return null;
+  let terms: ConsentTerms = null;
+  const ev = reg.legalEventId === null ? null : await readEvent(c, deps.rt.registry, reg.legalEventId);
+  if (ev?.type === GIVEAWAY_EVENTS.legalFrozen) {
+    const t = (ev.payload as FrozenLegal).terms;
+    terms = 'text' in t ? { text: t.text } : { url: t.url };
+  } else if (ev?.type === FRAMEWORK_EVENTS.legacyImported) {
+    const t = (ev.payload as LegacyImportedPayload).terms;
+    terms = t === null ? null : { text: t.text };
+  }
+  return { at: reg.since, terms };
+}
 
 async function publicView(c: pg.PoolClient, deps: ApiDeps, id: string, state: GiveawayState): Promise<PublicGiveaway> {
   const k = kernelInfo(deps.rt.kernels.get(state.kernelId));
@@ -142,6 +161,7 @@ export function registerPortalRoutes(app: FastifyInstance, deps: ApiDeps, pool: 
             ? { status: winnerStatus, claimDeadline: new Date(drawEvent.createdAt.getTime() + state.settings.claimDays * DAY_MS).toISOString(), contact: state.settings.contact }
             : null,
         legalEventId: state.legalEventId,
+        consent: await consentOf(c, deps, state, pid),
       };
     } finally {
       c.release();

@@ -361,4 +361,6 @@ export interface PortalDetail extends PublicGiveaway {
   lastGateResult: GateResult | null;
   winner: { status: WinnerStatus; claimDeadline: string; contact: string | null } | null;
   legalEventId: string | null;
+  /** Fassung der Teilnahmebedingungen, der die Person zugestimmt hat (null ohne Anmeldung). */
+  consent: { at: string; terms: { text: string } | { url: string } | null } | null;
 }
