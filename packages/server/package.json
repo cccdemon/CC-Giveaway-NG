@@ -13,7 +13,8 @@
     "start:app": "node dist/app/main.js",
     "start:scheduler": "node dist/scheduler/main.js",
     "start:ingest": "node dist/ingest/main.js",
-    "migrate-legacy": "node dist/migration/legacy/cli.js"
+    "migrate-legacy": "node dist/migration/legacy/cli.js",
+    "loadtest": "tsx scripts/load-test.ts"
   },
   "dependencies": {
     "@fastify/websocket": "^11.3.7",

@@ -9,6 +9,8 @@ export interface PoolOptions {
   queryTimeoutMillis?: number;
   /** Wird gerufen, wenn eine ruhende Verbindung stirbt (z. B. DB-Neustart). Ohne Listener beendet Node den Prozess. */
   onError?: (e: Error) => void;
+  /** Verbindungen im Pool (Default 10). Der Lasttest stellt ihn ein. */
+  max?: number;
 }
 
 export const DEFAULT_CONNECTION_TIMEOUT_MS = 5_000;
@@ -17,7 +19,7 @@ export const DEFAULT_QUERY_TIMEOUT_MS = 30_000;
 export function createPool(url: string, opts: PoolOptions = {}): pg.Pool {
   const pool = new pg.Pool({
     connectionString: url,
-    max: 10,
+    max: opts.max ?? 10,
     connectionTimeoutMillis: opts.connectionTimeoutMillis ?? DEFAULT_CONNECTION_TIMEOUT_MS,
     query_timeout: opts.queryTimeoutMillis ?? DEFAULT_QUERY_TIMEOUT_MS,
   });
