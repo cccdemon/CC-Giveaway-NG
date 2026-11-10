@@ -1,8 +1,10 @@
 <script lang="ts">
   // Einstellungen ändern (NEW_DESIGN.md 7.1: in Entwurf, Offen, Pausiert): Rahmen-Felder, Kern-Regeln, Bedingungen, Kanäle.
-  import type { GiveawaySettings, KernelInfo } from '../api/types.js';
+  import { cleanAnnouncements, validateAnnouncements } from '../announcements.js';
+  import type { AnnouncementKind, GiveawaySettings, KernelInfo } from '../api/types.js';
   import { L } from '../texts/labels.js';
   import { S } from '../texts/sentences.js';
+  import AnnouncementsForm from './AnnouncementsForm.svelte';
   import Button from './Button.svelte';
   import ConfigForm from './ConfigForm.svelte';
   import Field from './Field.svelte';
@@ -12,13 +14,15 @@
     settings: GiveawaySettings;
     kernel: KernelInfo;
     channelOptions: { pid: string; displayName: string }[];
+    /** Katalog der Chat-Ansagen; leer, solange er lädt. */
+    announcementKinds?: AnnouncementKind[];
     busy: boolean;
     error: string | null;
     onsave: (partial: Partial<GiveawaySettings>) => void;
     oncancel: () => void;
   }
 
-  let { settings, kernel, channelOptions, busy, error, onsave, oncancel }: Props = $props();
+  let { settings, kernel, channelOptions, announcementKinds = [], busy, error, onsave, oncancel }: Props = $props();
   const id = $props.id();
   // svelte-ignore state_referenced_locally
   const start = settings;
@@ -37,12 +41,16 @@
   let channels = $state<string[]>([...start.channels]);
   let config = $state<Record<string, unknown>>({ ...start.config });
   let gates = $state([...start.gates]);
+  let announcements = $state({ ...start.announcements, texts: { ...start.announcements.texts } });
+  let announcementErrors = $state<Record<string, string>>({});
   const chosen = $derived(channelOptions.filter((c) => channels.includes(c.pid)));
 
   const clean = (s: string): string | null => (s.trim() === '' ? null : s.trim());
 
   function submit(e: SubmitEvent) {
     e.preventDefault();
+    announcementErrors = validateAnnouncements(announcements, announcementKinds, kernel.id);
+    if (Object.keys(announcementErrors).length > 0) return;
     onsave({
       prize: prize.trim(),
       sponsor: clean(sponsor),
@@ -56,6 +64,7 @@
       channels,
       config,
       gates,
+      announcements: cleanAnnouncements(announcements),
     });
   }
 </script>
@@ -95,6 +104,10 @@
       <legend class="lbl">{L.fields.config}</legend>
       <ConfigForm schema={kernel.configSchema} value={config} onchange={(c) => (config = c)} />
     </fieldset>
+    <details class="group" open={Object.keys(announcementErrors).length > 0}>
+      <summary class="lbl">{L.announcements.title}</summary>
+      <AnnouncementsForm kinds={announcementKinds} kernelId={kernel.id} value={announcements} onchange={(a) => (announcements = a)} errors={announcementErrors} />
+    </details>
     <fieldset class="group">
       <legend class="lbl">{L.fields.gates}</legend>
       {#key channels.join(',')}
@@ -131,6 +144,10 @@
   }
   legend {
     padding: 0 6px;
+    color: var(--accent-2);
+  }
+  summary {
+    cursor: pointer;
     color: var(--accent-2);
   }
 </style>

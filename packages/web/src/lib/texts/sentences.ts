@@ -92,6 +92,16 @@ export const S = {
     windowClosed: 'Anmeldefenster geschlossen.',
     ticketsBought: (name: string, count: string, coins: string) => `${name} kauft ${count} Tickets für ${coins} Coins.`,
     ticketsRefunded: (name: string, count: string, coins: string) => `${name}: ${count} Tickets erstattet, ${coins} Coins zurück.`,
+    announced: (kind: string, channel: string) => `Ansage „${kind}“ bei ${channel} gesendet.`,
+    announcementFailed: (kind: string, channel: string, error: string) => `Ansage „${kind}“ bei ${channel} fehlgeschlagen: ${error}.`,
+  },
+  announcements: {
+    intro: 'Der Bot schreibt diese Ansagen in jeden Kanal des Giveaways. Leer lassen für den Standardtext.',
+    mutedHint: 'Die Gewinneransage bleibt immer an.',
+    linkHint: 'Der Link zur öffentlichen Seite kommt ans Ende jeder Ansage.',
+    noLinks: 'Links stehen nicht im Text. Hänge den Link per Haken an.',
+    unknownPlaceholder: (ph: string, allowed: string) => `Der Platzhalter ${ph} passt hier nicht. Erlaubt: ${allowed}.`,
+    winnerRequired: 'Die Gewinneransage braucht einen Text.',
   },
   wizard: {
     kernelHint: 'Der Kern bestimmt die Verlosungsmechanik. Nach dem Anlegen änderst du ihn nicht mehr.',

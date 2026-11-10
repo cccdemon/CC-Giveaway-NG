@@ -101,6 +101,8 @@ export interface DisplaySpec {
   beta: boolean;
   emptyPool: string;
   columns: { key: string; label: string }[];
+  /** Default-Texte der Chat-Ansagen je Kern-Ereignistyp. */
+  announcements?: Record<string, string>;
 }
 
 export interface KernelInfo {
@@ -142,6 +144,26 @@ export interface GiveawaySettings {
   purgeDays: number;
   keyword: string | null;
   chatBonus: ChatBonusSettings;
+  announcements: AnnouncementSettings;
+}
+
+/** Chat-Ansagen (NEW_DESIGN.md 10.3): stumm (außer Gewinner), Link anhängen, eigene Vorlagen je Art. */
+export interface AnnouncementSettings {
+  muted: boolean;
+  links: boolean;
+  texts: Record<string, string>;
+}
+
+/** Eine Art aus GET /api/announcements: Rahmen (kernel null) oder Kern. */
+export interface AnnouncementKind {
+  kind: string;
+  default: string;
+  placeholders: string[];
+  kernel: string | null;
+}
+
+export interface AnnouncementCatalog {
+  kinds: AnnouncementKind[];
 }
 
 /** Beim Anlegen: alles optional außer Gewinn und Kanälen, der Server füllt Defaults. */

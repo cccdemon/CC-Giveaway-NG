@@ -51,6 +51,18 @@ async function openGiveaway(api: ApiSetup, me: Awaited<ReturnType<typeof complet
 const get = (api: ApiSetup, url: string, cookie: string) => api.app.inject({ method: 'GET', url, headers: { cookie } });
 
 describe('Giveaway-API (Lesen)', () => {
+  it('GET /api/announcements lists framework kinds with defaults and placeholders plus the instant window kinds', async () => {
+    const api = await setup();
+    expect((await api.app.inject({ method: 'GET', url: '/api/announcements' })).statusCode).toBe(401);
+    const { cookie } = await login(api, ALICE);
+    const r = await get(api, '/api/announcements', cookie);
+    expect(r.statusCode).toBe(200);
+    const { kinds } = r.json() as { kinds: { kind: string; default: string; placeholders: string[]; kernel: string | null }[] };
+    expect(kinds.map((k) => k.kind)).toEqual(['opened', 'paused', 'resumed', 'closed', 'winner', 'boost_started', 'boost_ended', INSTANT_EVENTS.windowOpened, INSTANT_EVENTS.windowClosed]);
+    expect(kinds.find((k) => k.kind === 'winner')).toEqual({ kind: 'winner', default: expect.stringContaining('{gewinner}'), placeholders: ['{preis}', '{gewinner}', '{frist}'], kernel: null });
+    expect(kinds.find((k) => k.kind === INSTANT_EVENTS.windowOpened)).toMatchObject({ placeholders: ['{preis}', '{keyword}', '{bis}'], kernel: 'instant', default: expect.stringContaining('{bis}') });
+  });
+
   it('GET /kernels lists instant, watchtime, tickets with schema, gates, services and commands', async () => {
     const api = await setup();
     expect((await api.app.inject({ method: 'GET', url: '/api/kernels' })).statusCode).toBe(401);

@@ -1,6 +1,7 @@
 // Start-Assistent (NEW_DESIGN.md 11.1): Entwurf, Defaults aus dem Kern, Prüfung je Schritt, Umbau in die Einstellungen der API.
 // Rein, ohne I/O. Die Grenzen entsprechen denen des Servers (lifecycle.ts, services.ts, gates.ts, legal.ts).
-import type { ChatBonusSettings, Counting, CreateSettings, GateConfig, KernelInfo, LegalTexts } from './api/types.js';
+import { EMPTY_ANNOUNCEMENTS, cleanAnnouncements, validateAnnouncements } from './announcements.js';
+import type { AnnouncementKind, AnnouncementSettings, ChatBonusSettings, Counting, CreateSettings, GateConfig, KernelInfo, LegalTexts } from './api/types.js';
 import { L } from './texts/labels.js';
 import { S } from './texts/sentences.js';
 
@@ -20,6 +21,7 @@ export interface WizardDraft {
   purgeDays: number;
   keyword: string;
   chatBonus: ChatBonusSettings;
+  announcements: AnnouncementSettings;
   channels: string[];
   gates: GateConfig[];
   /** 'profile' = die Texte des Profils gelten (settings.legal = null). */
@@ -53,6 +55,7 @@ export function emptyDraft(): WizardDraft {
     purgeDays: 7,
     keyword: '',
     chatBonus: { enabled: true, sec: 2, minWords: 4, cooldownSec: 10 },
+    announcements: { ...EMPTY_ANNOUNCEMENTS, texts: {} },
     channels: [],
     gates: [],
     legal: 'profile',
@@ -79,8 +82,15 @@ export function legalMissing(l: LegalTexts): string[] {
 const isInt = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v);
 const inRange = (v: unknown, min: number, max: number): boolean => isInt(v) && v >= min && v <= max;
 
-/** Fehler je Feld (leer = Schritt in Ordnung). Konfig-Fehler stehen unter `config.<feld>`. */
-export function validateStep(step: Step, d: WizardDraft, k: KernelInfo | null, teamChannels: string[], profileLegal?: LegalTexts | null): Record<string, string> {
+/** Fehler je Feld (leer = Schritt in Ordnung). Konfig-Fehler stehen unter `config.<feld>`, Ansage-Fehler unter `announcements.<art>`. */
+export function validateStep(
+  step: Step,
+  d: WizardDraft,
+  k: KernelInfo | null,
+  teamChannels: string[],
+  profileLegal?: LegalTexts | null,
+  announcementKinds: AnnouncementKind[] = [],
+): Record<string, string> {
   const e: Record<string, string> = {};
   switch (step) {
     case 1:
@@ -101,6 +111,7 @@ export function validateStep(step: Step, d: WizardDraft, k: KernelInfo | null, t
         if (!inRange(d.chatBonus.minWords, c.minWords.min, c.minWords.max)) e['chatBonus.minWords'] = S.wizard.range(c.minWords.min, c.minWords.max);
         if (!inRange(d.chatBonus.cooldownSec, c.cooldownSec.min, c.cooldownSec.max)) e['chatBonus.cooldownSec'] = S.wizard.range(c.cooldownSec.min, c.cooldownSec.max);
       }
+      for (const [kind, msg] of Object.entries(validateAnnouncements(d.announcements, announcementKinds, d.kernelId))) e[`announcements.${kind}`] = msg;
       if (k) {
         for (const [key, f] of Object.entries(k.configSchema)) {
           const v = d.config[key];
@@ -162,6 +173,7 @@ export function toSettings(d: WizardDraft): CreateSettings {
     purgeDays: d.purgeDays,
     keyword: clean(d.keyword),
     chatBonus: { ...d.chatBonus },
+    announcements: cleanAnnouncements(d.announcements),
     config: { ...d.config },
   };
 }
@@ -179,6 +191,7 @@ const STEP_OF_CODE: Record<string, Step> = {
   invalid_counting: 2,
   invalid_purge_days: 2,
   invalid_chat_bonus: 2,
+  invalid_announcement: 2,
   channels_required: 3,
   invalid_channel: 3,
   channel_not_in_team: 3,

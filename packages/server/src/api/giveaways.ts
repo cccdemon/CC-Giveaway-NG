@@ -12,6 +12,7 @@ import { revertedIds } from '../journal/journal.js';
 import { channelStatusView } from '../ingest/status-view.js';
 import type { ApiDeps } from './auth.js';
 import { bodyOf, executeAs } from './commands.js';
+import { announcementCatalog } from '../framework/giveaway/announcements.js';
 import { giveawayDetail, historyPage, kernelInfo, loadGiveaway, participantRows } from './giveaways-read.js';
 import { rejectionToHttp } from './http.js';
 import { requireSession } from './session.js';
@@ -95,6 +96,8 @@ export function registerGiveawayRoutes(app: FastifyInstance, deps: ApiDeps, pool
   };
 
   app.get('/kernels', guard, async () => deps.rt.kernels.list().map(kernelInfo));
+  // Katalog der Chat-Ansagen (NEW_DESIGN.md 10.3): Arten, Default-Texte, erlaubte Platzhalter. Beschriftungen stehen in der Web-App.
+  app.get('/announcements', guard, async () => ({ kinds: announcementCatalog(deps.rt.kernels.list()) }));
 
   app.get<{ Querystring: { status?: string } }>('/giveaways', guard, async (req) => {
     const pid = req.session!.pid;

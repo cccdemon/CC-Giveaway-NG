@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { KernelInfo, LegalTexts } from './api/types.js';
+import { KINDS } from './announcements.test.js';
 import { emptyDraft, stepOfRejection, toSettings, validateStep, withKernel } from './wizard.js';
 
 const watchtime: KernelInfo = {
@@ -51,6 +52,16 @@ describe('wizard', () => {
     expect(validateStep(2, { ...ok, chatBonus: { enabled: false, sec: 99, minWords: 99, cooldownSec: 0 } }, watchtime, [])).toEqual({});
   });
 
+  it('validateStep 2 rejects an announcement template with a link or unknown placeholder and an empty winner text', () => {
+    const ok = { ...withKernel(emptyDraft(), watchtime), prize: 'Key' };
+    const a = (texts: Record<string, string>) => ({ ...ok, announcements: { muted: false, links: true, texts } });
+    expect(validateStep(2, a({ opened: 'Los {preis}' }), watchtime, [], null, KINDS)).toEqual({});
+    expect(validateStep(2, a({ opened: 'https://x' }), watchtime, [], null, KINDS)).toHaveProperty('announcements.opened');
+    expect(validateStep(2, a({ opened: 'Hi {gewinner}' }), watchtime, [], null, KINDS)).toHaveProperty('announcements.opened');
+    expect(validateStep(2, a({ winner: '' }), watchtime, [], null, KINDS)).toHaveProperty('announcements.winner');
+    expect(toSettings(a({ opened: ' Los ', paused: '' })).announcements).toEqual({ muted: false, links: true, texts: { opened: 'Los' } });
+  });
+
   it('validateStep 3 needs at least one channel inside the team', () => {
     const d = withKernel({ ...emptyDraft(), prize: 'Key' }, watchtime);
     expect(validateStep(3, d, watchtime, [CH_A, CH_B])).toHaveProperty('channels');
@@ -92,9 +103,14 @@ describe('wizard', () => {
       purgeDays: 7,
       keyword: null,
       chatBonus: { enabled: true, sec: 2, minWords: 4, cooldownSec: 10 },
+      announcements: { muted: false, links: true, texts: {} },
       config: { coinBaseSec: 7200, bonus: false, note: '' },
     });
     expect(toSettings({ ...d, legal: FULL_LEGAL }).legal).toEqual(FULL_LEGAL);
+  });
+
+  it('stepOfRejection maps invalid_announcement→2', () => {
+    expect(stepOfRejection('invalid_announcement')).toBe(2);
   });
 
   it('stepOfRejection maps keyword_reserved→2, invalid_gate→4, legal_required→5, others→6', () => {

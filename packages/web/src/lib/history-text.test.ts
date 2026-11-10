@@ -46,6 +46,11 @@ describe('historyText', () => {
     expect(historyText(entry('participant_registered', { pid: GONE }), names, false)).toBe('gelöschter Teilnehmer #dddddddd hat sich angemeldet.');
   });
 
+  it('announcement_sent renders sent and failed announcements with kind label and channel name', () => {
+    expect(historyText(entry('announcement_sent', { kind: 'opened', channel: CHANNEL, triggerEventId: '1', ok: true, messageId: 'm' }), names, true)).toBe('Ansage „Geöffnet“ bei kanal_nord gesendet.');
+    expect(historyText(entry('announcement_sent', { kind: 'winner', channel: CHANNEL, triggerEventId: '1', ok: false, error: 'rate_limited' }), names, false)).toBe('Ansage „Gewinner“ bei kanal_nord fehlgeschlagen: rate_limited.');
+  });
+
   it('falls back to type and payload keys for unknown types', () => {
     expect(historyText(entry('legacy_imported', { entries: [], a: 1 }), names, false)).toBe('legacy_imported: entries, a.');
     expect(historyText(entry('weird', null), names, false)).toBe('weird.');

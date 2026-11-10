@@ -1,7 +1,7 @@
 <script lang="ts">
   import { invalidate } from '$app/navigation';
   import { Action as Cmd } from '#lib/action.svelte.js';
-  import type { GiveawaySettings, HistoryEntry, TeamDetail, WinnerStatus } from '#lib/api/types.js';
+  import type { AnnouncementCatalog, AnnouncementKind, GiveawaySettings, HistoryEntry, TeamDetail, WinnerStatus } from '#lib/api/types.js';
   import ActionBar from '#lib/components/ActionBar.svelte';
   import BoostForm from '#lib/components/BoostForm.svelte';
   import Confirm from '#lib/components/Confirm.svelte';
@@ -35,6 +35,7 @@
   /** Zählt das Öffnen des Einstellungs-Panels: das Formular lebt, bis die Person es schließt, nicht bis zum nächsten Live-Ereignis. */
   let settingsOpened = $state(0);
   let channelOptions = $state<{ pid: string; displayName: string }[] | null>(null);
+  let announcementKinds = $state<AnnouncementKind[] | null>(null);
   const teamCmd = new Cmd();
 
   const view = $derived(actionsOf({ status: detail.status, boost: detail.boost, kernel: detail.kernel, winners: detail.winners }));
@@ -54,6 +55,7 @@
       if (panel === 'settings') {
         settingsOpened += 1;
         if (channelOptions === null) await loadChannelOptions();
+        if (announcementKinds === null) announcementKinds = (await teamCmd.run((api) => api.get<AnnouncementCatalog>('/api/announcements')))?.kinds ?? null;
       }
       return;
     }
@@ -132,7 +134,7 @@
   <CorrectionForm channels={detail.channels} rows={data.participants} busy={panelCmd.busy} error={panelCmd.error} onsubmit={correct} oncancel={() => (panel = null)} />
 {:else if panel === 'settings'}
   {#key settingsOpened}
-    <SettingsPanel settings={detail.settings} kernel={detail.kernel} channelOptions={channelOptions ?? []} busy={panelCmd.busy} error={panelCmd.error ?? teamCmd.error} onsave={saveSettings} oncancel={() => (panel = null)} />
+    <SettingsPanel settings={detail.settings} kernel={detail.kernel} channelOptions={channelOptions ?? []} announcementKinds={announcementKinds ?? []} busy={panelCmd.busy} error={panelCmd.error ?? teamCmd.error} onsave={saveSettings} oncancel={() => (panel = null)} />
   {/key}
 {/if}
 

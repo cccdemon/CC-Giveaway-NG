@@ -49,6 +49,8 @@
     <dd>{draft.counting === 'registered' ? L.fields.countingRegistered : `${L.fields.countingFirstSeen} · ${L.fields.purgeDays}: ${draft.purgeDays}`}</dd>
     <dt>{L.fields.team} · {L.fields.channels}</dt>
     <dd>{teamName} · {channels.length === 0 ? '–' : channels.map((c) => c.displayName).join(', ')}</dd>
+    <dt>{L.announcements.title}</dt>
+    <dd>{draft.announcements.muted ? L.announcements.off : L.announcements.on} · {draft.announcements.links ? L.announcements.withLink : L.announcements.withoutLink}</dd>
     <dt>{L.fields.gates}</dt>
     <dd>{draft.gates.length === 0 ? L.gates.none : draft.gates.map((g) => gateText(g, channels)).join(' · ')}</dd>
     <dt>{L.fields.legal}</dt>

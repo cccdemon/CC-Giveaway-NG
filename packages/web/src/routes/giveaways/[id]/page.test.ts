@@ -37,6 +37,7 @@ function detailOf(): GiveawayDetail {
       purgeDays: 7,
       keyword: null,
       chatBonus: { enabled: true, sec: 2, minWords: 4, cooldownSec: 10 },
+      announcements: { muted: false, links: true, texts: {} },
     },
     legal: null,
     legalEventId: null,

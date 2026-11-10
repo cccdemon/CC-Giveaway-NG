@@ -69,6 +69,12 @@ export function kindsFor(kernel: AnyKernel): AnnouncementKind[] {
   return [...framework, ...own];
 }
 
+/** Katalog über alle Kerne: Arten des Rahmens einmal, dann die eigenen Arten jedes Kerns (GET /api/announcements). */
+export function announcementCatalog(kernels: readonly AnyKernel[]): AnnouncementKind[] {
+  const framework = FRAMEWORK_KINDS.map((kind) => ({ kind, default: DEFAULTS[kind].text, placeholders: PLACEHOLDERS[kind], kernel: null }));
+  return [...framework, ...kernels.flatMap((k) => kindsFor(k).filter((x) => x.kernel !== null))];
+}
+
 function placeholdersOf(kind: string, kernel: AnyKernel): readonly string[] | null {
   if ((FRAMEWORK_KINDS as readonly string[]).includes(kind)) return PLACEHOLDERS[kind as FrameworkKind];
   if (kernel.display.announcements && kind in kernel.display.announcements) return KERNEL_PLACEHOLDERS;

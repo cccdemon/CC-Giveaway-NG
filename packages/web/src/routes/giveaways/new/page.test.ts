@@ -41,7 +41,7 @@ describe('Start-Assistent', () => {
       if (url === `/api/giveaways/${GID}/open`) return new Response(JSON.stringify({ code: 'legal_required', message: 'Hinterlege zuerst: Impressum.' }), { status: 400, headers: { 'content-type': 'application/json' } });
       return new Response(null, { status: 500 });
     });
-    render(Page, { props: { data: { me, kernels: [instant], teams, members: { 'solo-1': [{ pid: me.pid, displayName: 'Alice' }] } } } as never });
+    render(Page, { props: { data: { me, kernels: [instant], teams, members: { 'solo-1': [{ pid: me.pid, displayName: 'Alice' }] }, announcementKinds: [] } } as never });
     await fireEvent.click(screen.getByRole('radio', { name: /Sofortverlosung/ }));
     const next = () => fireEvent.click(screen.getByRole('button', { name: new RegExp(`^${L.actions.next}`) }));
     await next();

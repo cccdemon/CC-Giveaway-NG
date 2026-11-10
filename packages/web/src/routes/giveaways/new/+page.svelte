@@ -3,6 +3,7 @@
   import { Action } from '#lib/action.svelte.js';
   import { ApiError } from '#lib/api/client.js';
   import type { CommandResult, KernelInfo, LegalTexts } from '#lib/api/types.js';
+  import AnnouncementsForm from '#lib/components/AnnouncementsForm.svelte';
   import Button from '#lib/components/Button.svelte';
   import ChannelsForm from '#lib/components/ChannelsForm.svelte';
   import ConfigForm from '#lib/components/ConfigForm.svelte';
@@ -35,14 +36,15 @@
   const channelNames = $derived(Object.fromEntries(Object.values(data.members).flat().map((m) => [m.pid, m.displayName])));
   const teamName = $derived(draft.teamId === data.me.soloTeamId ? L.solo : (data.teams.teams.find((t) => t.teamId === draft.teamId)?.name ?? '–'));
   const profileOk = $derived(legalComplete(data.me.legal));
-  const done = $derived(STEPS.filter((s) => s < step && Object.keys(validateStep(s, draft, kernel, teamChannels, data.me.legal)).length === 0));
+  const done = $derived(STEPS.filter((s) => s < step && Object.keys(validateStep(s, draft, kernel, teamChannels, data.me.legal, data.announcementKinds)).length === 0));
+  const announcementErrors = $derived(Object.fromEntries(Object.entries(errors).filter(([k]) => k.startsWith('announcements.')).map(([k, v]) => [k.slice('announcements.'.length), v])));
 
   function chooseKernel(k: KernelInfo) {
     draft = withKernel(draft, k);
     errors = {};
   }
   function next() {
-    errors = validateStep(step, draft, kernel, teamChannels, data.me.legal);
+    errors = validateStep(step, draft, kernel, teamChannels, data.me.legal, data.announcementKinds);
     if (Object.keys(errors).length > 0) return;
     serverError = null;
     if (step < 6) step = (step + 1) as Step;
@@ -68,7 +70,7 @@
   async function submit(openNow: boolean) {
     for (const s of STEPS) {
       if (s === 6) break;
-      const e = validateStep(s, draft, kernel, teamChannels, data.me.legal);
+      const e = validateStep(s, draft, kernel, teamChannels, data.me.legal, data.announcementKinds);
       if (Object.keys(e).length > 0) {
         step = s;
         errors = e;
@@ -180,6 +182,10 @@
           {/if}
         </fieldset>
       {/if}
+      <details class="group" open={Object.keys(announcementErrors).length > 0}>
+        <summary class="lbl">{L.announcements.title}</summary>
+        <AnnouncementsForm kinds={data.announcementKinds} kernelId={draft.kernelId} value={draft.announcements} onchange={(a) => (draft = { ...draft, announcements: a })} errors={announcementErrors} />
+      </details>
     {:else if step === 3}
       <ChannelsForm teams={data.teams} soloTeamId={data.me.soloTeamId} members={data.members} teamId={draft.teamId} channels={draft.channels} onteam={setTeam} onchannels={(c) => (draft = { ...draft, channels: c })} error={errors.channels ?? null} />
     {:else if step === 4 && kernel}
@@ -286,6 +292,10 @@
   }
   legend {
     padding: 0 6px;
+    color: var(--accent-2);
+  }
+  summary {
+    cursor: pointer;
     color: var(--accent-2);
   }
   .kernels {
