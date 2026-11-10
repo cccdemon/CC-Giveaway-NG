@@ -1,13 +1,11 @@
-import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { BACKUP_VERSION, LegacyFormatError, checkSums, loginsOf, parseBackup, type LegacyBackup } from '../src/migration/legacy/format.js';
+import { BACKUP_VERSION, LegacyFormatError, checkSums, loginsOf, parseBackup } from '../src/migration/legacy/format.js';
 import { giveawayIdOf, soloTeamIdOf, teamIdOf } from '../src/migration/legacy/ids.js';
 import { helixLoginResolver } from '../src/migration/legacy/resolve.js';
 import { uuidV5 } from '../src/shared/uuid.js';
 import { UUID_RE } from '../src/framework/authorize.js';
 
-export const FIXTURE_TEXT = readFileSync(new URL('./fixtures/legacy/export-v2.json', import.meta.url), 'utf8');
-export const fixture = (): LegacyBackup => parseBackup(FIXTURE_TEXT);
+import { FIXTURE_TEXT, fixture } from './helpers/legacy.js';
 
 const codeOf = (fn: () => unknown): string => {
   try {
@@ -74,6 +72,7 @@ describe('Export v2 lesen', () => {
   it('helixLoginResolver resolves in chunks of 100 and keys by lowercase login; unknown logins are missing', async () => {
     const calls: string[][] = [];
     const resolver = helixLoginResolver({
+      async getUsers() { return []; },
       async getUsersByLogin(logins) {
         calls.push(logins);
         return logins.filter((l) => l !== 'ghost_9').map((l) => ({ id: `id-${l}`, login: l, displayName: l.toUpperCase(), createdAt: '2020-01-01T00:00:00Z' }));
@@ -89,5 +88,21 @@ describe('Export v2 lesen', () => {
     expect(out.has('ghost_9')).toBe(false);
     expect(await resolver.byLogin([])).toEqual(new Map());
     expect(calls).toHaveLength(2);
+  });
+
+  it('helixLoginResolver.byId resolves twitch ids in chunks of 100 and keys by id', async () => {
+    const calls: string[][] = [];
+    const resolver = helixLoginResolver({
+      async getUsersByLogin() { return []; },
+      async getUsers(ids) {
+        calls.push(ids);
+        return ids.filter((id) => id !== '9').map((id) => ({ id, login: `user${id}`, displayName: `User ${id}`, createdAt: '2020-01-01T00:00:00Z' }));
+      },
+    });
+    const out = await resolver.byId([...Array.from({ length: 101 }, (_, i) => String(i)), '9']);
+    expect(calls.map((c) => c.length)).toEqual([100, 1]);
+    expect(out.get('5')).toEqual({ id: '5', login: 'user5', displayName: 'User 5' });
+    expect(out.has('9')).toBe(false);
+    expect(await resolver.byId([])).toEqual(new Map());
   });
 });

@@ -263,6 +263,20 @@ describe('Fortsetzen und Wiederöffnen frieren Rechtstexte ein (Übernahme, NEW_
     expect(codeOf(await run(s.rt, s.rt.handlers.resume, { giveawayId: GID }))).toBe('invalid_transition');
   });
 
+  it('after a reverted open the draft keeps editable legal texts and the next open freezes anew', async () => {
+    const fetcher = stubFetcher({ 'https://s.example/impressum': 'h-imp', 'https://s.example/datenschutz': 'h-ds' });
+    const s = await setupGiveaway({ legalSource: { profileOf: async () => null }, fetcher });
+    close = s.close;
+    await must(s.rt, s.rt.handlers.create, { giveawayId: GID, teamId: TEAM, kernelId: 'instant', settings: { prize: 'Key', channels: [P1], legal: FULL } });
+    const [, opened] = await must(s.rt, s.rt.handlers.open, { giveawayId: GID });
+    await must(s.rt, s.rt.handlers.revert, { stream: giveawayStream(GID), eventId: opened!.id, reason: 'Zu früh.' });
+    expect((await state(s.rt)).status).toBe('draft');
+    expect(codeOf(await run(s.rt, s.rt.handlers.changeSettings, { giveawayId: GID, settings: { legal: { ...FULL, terms: { text: 'Neu.' } } } }))).toBe('ok');
+    const again = await must(s.rt, s.rt.handlers.open, { giveawayId: GID });
+    expect(again.map((e) => e.type)).toEqual([GIVEAWAY_EVENTS.legalFrozen, GIVEAWAY_EVENTS.statusChanged]);
+    expect(again[0]!.payload).toMatchObject({ terms: { text: 'Neu.' } });
+  });
+
   it('reopen of an imported closed giveaway takes the profile texts, freezes and opens; a normal giveaway resumes without fetching', async () => {
     const fetcher = stubFetcher({ 'https://p/i': 'h-i', 'https://p/t': 'h-t', 'https://p/d': 'h-d', 'https://s.example/impressum': 'h', 'https://s.example/datenschutz': 'h' });
     const profile: LegalTexts = { impressumUrl: 'https://p/i', terms: { url: 'https://p/t' }, privacyUrl: 'https://p/d' };

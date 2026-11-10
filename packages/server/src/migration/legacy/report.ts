@@ -18,7 +18,8 @@ const STATUS: Record<'paused' | 'closed', string> = { paused: 'Pausiert', closed
 function teamLines(t: TeamReport): string[] {
   const out = [`Team ${t.legacyTeamId} „${t.name}“ (${t.kind === 'solo' ? 'Solo-Team' : 'Team'}): ${OUTCOME[t.outcome]}${t.teamId ? `, ID ${t.teamId}` : ''}${t.reason ? `. ${t.reason}` : ''}`];
   if (t.membersSkipped.length > 0) out.push(`  Mitglieder nicht auflösbar: ${t.membersSkipped.join(', ')}`);
-  if (t.bansSkipped.length > 0) out.push(`  Sperren nicht übernommen (${t.kind === 'solo' ? 'Solo-Team hat keine Sperrliste' : 'Login nicht auflösbar'}): ${t.bansSkipped.join(', ')}`);
+  if (t.bansSkipped.length > 0) out.push(`  Sperren nicht übernommen: ${t.bansSkipped.join(', ')}`);
+  for (const n of t.notes) out.push(`  Hinweis: ${n}`);
   return out;
 }
 
@@ -30,6 +31,7 @@ function giveawayLines(g: GiveawayReport): string[] {
     out.push(`  Kanal ${c.login}${c.inactive ? ' (inaktiv, kein Mitglied)' : ''}: ${c.imported} s übernommen, Altsystem ${c.pgWatchSum} s, nicht übernommen ${c.notImported} s`);
   }
   for (const u of g.unresolved) out.push(`  Nicht auflösbar: ${u.login}, ${u.sec} s auf ${u.channel}`);
+  for (const u of g.bannedSkipped) out.push(`  Gesperrt im Altsystem, nicht übernommen: ${u.login}, ${u.sec} s auf ${u.channel}`);
   for (const n of g.notes) out.push(`  Hinweis: ${n}`);
   return out;
 }

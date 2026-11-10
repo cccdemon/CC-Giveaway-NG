@@ -268,7 +268,8 @@ export function changeSettingsHandler(d: GiveawayDeps): CommandHandler<ChangeSet
       if (s.channels !== undefined && outsideTeam(after.channels.filter((ch) => !before.channels.includes(ch)), team)) return CHANNEL_NOT_IN_TEAM();
       if (canonicalJson(after) === canonicalJson(before)) return [];
       // Der eingefrorene Nachweis (9.4) darf nicht still von den sichtbaren Texten abweichen. Ein übernommenes Giveaway (15.4) hat noch keinen.
-      if (state.legal !== null && canonicalJson(after.legal) !== canonicalJson(before.legal)) {
+      // Im Entwurf (auch nach zurückgenommenem Öffnen) bleibt legal änderbar: Öffnen friert dann erneut ein.
+      if (state.legal !== null && state.status !== 'draft' && canonicalJson(after.legal) !== canonicalJson(before.legal)) {
         return reject('legal_locked', 'Die Rechtstexte sind seit dem Öffnen eingefroren. Für neue Texte lege ein neues Giveaway an.');
       }
       return [{ type: GIVEAWAY_EVENTS.settingsChanged, payload: { before, after } }];

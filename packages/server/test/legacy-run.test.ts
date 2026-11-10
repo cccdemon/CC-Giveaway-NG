@@ -6,7 +6,7 @@ import { findPidByTwitchId, type TwitchUser } from '../src/identity/identities.j
 import { identityResolver } from '../src/identity/resolver.js';
 import { attachAccounts, type AccountHandlers } from '../src/identity/runtime.js';
 import { assertNoTwitchIdentity } from '../src/journal/guard.js';
-import { parseBackup, type LegacyBackup } from '../src/migration/legacy/format.js';
+import type { LegacyBackup } from '../src/migration/legacy/format.js';
 import { giveawayIdOf, soloTeamIdOf, teamIdOf } from '../src/migration/legacy/ids.js';
 import { renderReport, reportPathOf } from '../src/migration/legacy/report.js';
 import type { LoginResolver } from '../src/migration/legacy/resolve.js';
@@ -14,7 +14,7 @@ import { runImport, type RunResult } from '../src/migration/legacy/run.js';
 import { AT } from './helpers/db.js';
 import { ctx } from './helpers/fixtures.js';
 import { setupGiveaway, state } from './helpers/giveaway.js';
-import { FIXTURE_TEXT } from './legacy-format.test.js';
+import { fixture } from './helpers/legacy.js';
 
 let close: (() => Promise<void>) | undefined;
 afterEach(async () => {
@@ -23,7 +23,6 @@ afterEach(async () => {
 });
 
 const KEY = randomBytes(32);
-const fixture = (): LegacyBackup => parseBackup(FIXTURE_TEXT);
 /** Alt-Team mit genau einem Mitglied: wird auf das Solo-Team abgebildet. */
 const soloFixture = (): LegacyBackup => {
   const b = fixture();
@@ -33,15 +32,22 @@ const soloFixture = (): LegacyBackup => {
 
 const userOf = (login: string): TwitchUser => ({ id: login === 'streamer_a' ? '1001' : `id-${login}`, login, displayName: login.toUpperCase() });
 
-function stubResolver(unknown: string[] = ['ghost_9']) {
+const loginOfId = (id: string): string => (id === '1001' ? 'streamer_a' : id.replace(/^id-/, ''));
+
+function stubResolver(unknown: string[] = ['ghost_9'], unknownIds: string[] = []) {
   const calls: string[][] = [];
+  const idCalls: string[][] = [];
   const resolver: LoginResolver = {
     async byLogin(logins) {
       calls.push(logins);
       return new Map(logins.filter((l) => !unknown.includes(l)).map((l) => [l, userOf(l)]));
     },
+    async byId(ids) {
+      idCalls.push(ids);
+      return new Map(ids.filter((id) => !unknownIds.includes(id)).map((id) => [id, userOf(loginOfId(id))]));
+    },
   };
-  return { resolver, calls };
+  return { resolver, calls, idCalls };
 }
 
 async function setup() {
@@ -79,10 +85,13 @@ describe('runImport', () => {
     expect(g1.participants).toEqual({ total: 7, imported: 5, registered: 3, dropped: 2 });
     expect(g1.channels).toEqual([
       { login: 'streamer_a', pid: await findPidByTwitchId(s.pool, '1001'), imported: 38101, pgWatchSum: 38221, notImported: 120, inactive: false },
-      { login: 'kanal_b', pid: await findPidByTwitchId(s.pool, 'id-kanal_b'), imported: 7200, pgWatchSum: 7200, notImported: 0, inactive: false },
+      { login: 'kanal_b', pid: await findPidByTwitchId(s.pool, 'id-kanal_b'), imported: 7200, pgWatchSum: 7200, notImported: 0, inactive: true },
       { login: 'kanal_c', pid: await findPidByTwitchId(s.pool, 'id-kanal_c'), imported: 600, pgWatchSum: 600, notImported: 0, inactive: true },
     ]);
+    // Der Kanal kanal_b gehört dem Twitch-Konto kanal_b, Mitglied ist streamer_b: ohne Beitritt des Kanal-Inhabers bleibt er inaktiv.
+    expect(g1.notes).toEqual(expect.arrayContaining([expect.stringContaining('kanal_b'), expect.stringContaining('kanal_c')]));
     expect(g1.unresolved).toEqual([{ login: 'ghost_9', channel: 'streamer_a', sec: 120 }]);
+    expect(g1.bannedSkipped).toEqual([]);
     const g2 = r.giveaways[1]!;
     expect(g2.notes).toEqual(expect.arrayContaining([expect.stringContaining('Coin-Basis'), expect.stringContaining('Follow'), expect.stringContaining('Gewinn')]));
     const g3 = r.giveaways[2]!;
@@ -120,6 +129,13 @@ describe('runImport', () => {
     const { resolver } = stubResolver();
     const r = await run(s, soloFixture(), resolver);
     expect(r.team).toMatchObject({ kind: 'solo', teamId: soloTeamIdOf('1001'), outcome: 'created', bansSkipped: ['troll_t'] });
+    // Ohne Sperrliste bleibt die Sperre wirksam, indem die gesperrte Person nicht übernommen wird (Sekunden im Bericht).
+    const g1 = r.giveaways[0]!;
+    expect(g1.bannedSkipped).toEqual([{ login: 'troll_t', channel: 'streamer_a', sec: 300 }]);
+    expect(g1.participants).toEqual({ total: 7, imported: 4, registered: 3, dropped: 3 });
+    expect(g1.channels[0]).toMatchObject({ login: 'streamer_a', imported: 37801, pgWatchSum: 38221, notImported: 420 });
+    expect(await findPidByTwitchId(s.pool, 'id-troll_t')).toBeNull();
+    expect(await rows(s.pool, 'SELECT pid FROM giveaway_participants WHERE giveaway_id = $1', [SESS1])).toHaveLength(4);
     const pid = await findPidByTwitchId(s.pool, '1001');
     expect(await rows(s.pool, 'SELECT pid, solo_team_id FROM accounts')).toEqual([{ pid, solo_team_id: soloTeamIdOf('1001') }]);
     expect((await state(s.rt, SESS1)).teamId).toBe(soloTeamIdOf('1001'));
@@ -178,10 +194,51 @@ describe('runImport', () => {
     expect((await rows(t.pool, 'SELECT pid FROM team_members'))).toHaveLength(1);
 
     const u = await setup();
-    const r3 = await run(u, fixture(), stubResolver(['streamer_a', 'streamer_b']).resolver);
+    const r3 = await run(u, fixture(), stubResolver(['streamer_a', 'streamer_b'], ['1001']).resolver);
     expect(r3.team).toMatchObject({ outcome: 'skipped' });
     expect(r3.giveaways.map((g) => g.outcome)).toEqual(['skipped', 'skipped', 'skipped']);
     expect(await eventCount(u.pool)).toBe(0);
+  });
+
+  it('resolves members with a known twitchId by id, so a renamed streamer still joins; the login resolution alone does not decide', async () => {
+    const s = await setup();
+    const { resolver, idCalls } = stubResolver(['ghost_9', 'streamer_a']);
+    const r = await run(s, fixture(), resolver);
+    expect(idCalls).toEqual([['1001']]);
+    expect(r.team).toMatchObject({ outcome: 'created', membersSkipped: [] });
+    expect(r.unresolved).toContain('streamer_a');
+    expect((await rows(s.pool, 'SELECT pid FROM team_members'))).toHaveLength(2);
+    // Kanal streamer_a: Login unbekannt, aber der Inhaber ist über die ID bekannt. Der Kanal gilt trotzdem als nicht auflösbar (Login-Kanal).
+    expect(r.giveaways[0]!.outcome).toBe('skipped');
+    // Widerspruch zwischen ID und Login: die ID gewinnt, der Bericht sagt es.
+    const t = await setup();
+    const b = fixture();
+    b.team.members[0]!.twitchId = 'id-viewer_1';
+    const r2 = await run(t, b, stubResolver().resolver);
+    expect(r2.team!.notes).toEqual([expect.stringContaining('streamer_a')]);
+    const members = (await rows(t.pool, 'SELECT pid FROM team_members')).map((x) => x.pid);
+    expect(members).toContain(await findPidByTwitchId(t.pool, 'id-viewer_1'));
+    expect(members).not.toContain(await findPidByTwitchId(t.pool, '1001'));
+  });
+
+  it('pre-checks what the commands would reject: overlong terms drop the version with a note, a long team name is cut, a banned member is not banned', async () => {
+    const s = await setup();
+    const b = fixture();
+    b.team.name = 'x'.repeat(70);
+    b.team.banned = ['troll_t', 'streamer_b'];
+    b.instances[0]!.termsText = 'y'.repeat(20_001);
+    const dry = await run(s, b, stubResolver().resolver, true);
+    expect(dry.team).toMatchObject({ outcome: 'would_create', bansSkipped: ['streamer_b'], notes: [expect.stringContaining('streamer_b'), expect.stringContaining('Teamname')] });
+    expect(dry.giveaways[0]!.notes).toEqual(expect.arrayContaining([expect.stringContaining('20000')]));
+    const r = await run(s, b, stubResolver().resolver);
+    expect(r.failed).toBe(0);
+    expect(r.team!.outcome).toBe('created');
+    expect(r.giveaways.map((g) => g.outcome)).toEqual(['created', 'created', 'created']);
+    expect((await rows(s.pool, 'SELECT name FROM teams'))[0]!.name).toBe('x'.repeat(60));
+    expect((await rows(s.pool, 'SELECT pid FROM team_bans'))).toHaveLength(1);
+    const st = await state(s.rt, SESS1);
+    expect(st.settings.legal).toBeNull();
+    expect(st.legalEventId).toBeNull();
   });
 
   it('a checksum deviation aborts before resolving; a resolver that throws aborts with helix; nothing is written either way', async () => {
@@ -193,7 +250,7 @@ describe('runImport', () => {
     expect(r.aborted).toEqual({ code: 'checksum', message: expect.stringContaining('kanal_b') });
     expect(r.aborted!.message).toContain('200');
     expect(calls).toHaveLength(0);
-    const failing: LoginResolver = { byLogin: async () => { throw new Error('Twitch Helix: helix_unreachable'); } };
+    const failing: LoginResolver = { byLogin: async () => { throw new Error('Twitch Helix: helix_unreachable'); }, byId: async () => new Map() };
     const r2 = await run(s, fixture(), failing);
     expect(r2.aborted).toEqual({ code: 'helix', message: expect.stringContaining('helix_unreachable') });
     expect(await eventCount(s.pool)).toBe(0);
@@ -204,7 +261,7 @@ describe('runImport', () => {
 describe('Bericht', () => {
   it('names file, dry run, team, giveaways, seconds per channel, unresolved logins, skipped and failed with sums', async () => {
     const s = await setup();
-    const r = await run(s, fixture(), stubResolver().resolver, true);
+    const r = await run(s, soloFixture(), stubResolver().resolver, true);
     const text = renderReport('C:\\export\\team_chaoscrew.json', true, AT, r);
     expect(text).toContain('team_chaoscrew.json');
     expect(text).toContain('Probelauf');
@@ -212,7 +269,7 @@ describe('Bericht', () => {
     expect(text).toContain('sess_1700000001');
     expect(text).toContain('Werwolf');
     expect(text).toContain('streamer_a');
-    expect(text).toContain('38101');
+    expect(text).toContain('37801');
     expect(text).toContain('38221');
     expect(text).toContain('ghost_9');
     expect(text).toContain('120');
@@ -220,6 +277,7 @@ describe('Bericht', () => {
     expect(text).toContain('Giveaways: 3');
     expect(reportPathOf('C:\\export\\team_chaoscrew.json')).toBe('C:\\export\\team_chaoscrew.json.bericht.txt');
 
+    expect(text).toContain('troll_t');
     const aborted = renderReport('x.json', false, AT, { aborted: { code: 'checksum', message: 'Kanal kanal_b: Datei 7200, Altsystem 7000, Differenz 200.' }, team: null, giveaways: [], unresolved: [], failed: 0 });
     expect(aborted).toContain('Abbruch');
     expect(aborted).toContain('Differenz 200');
