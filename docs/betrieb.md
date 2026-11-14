@@ -1,11 +1,11 @@
 # Betrieb
 
-Runbook für Deploy, Stichtag, Rollback und Wiederherstellung (NEW_DESIGN.md 12.3, 12.5, 15.4). Ziel ist LXC 103 („streamer“, 10.10.10.99) neben dem Altsystem, mit eigener Domain.
+Runbook für Deploy, Stichtag, Rollback und Wiederherstellung (NEW_DESIGN.md 12.3, 12.5, 15.4). Ziel ist ein eigener Container auf dem Proxmox-Host: LXC 112 „giveaway“ (10.10.10.46, Ubuntu 24.04, unprivileged mit `nesting=1,keyctl=1`, 4 Kerne, 4 GB, 60 GB). Das Altsystem bleibt auf LXC 103 (10.10.10.99).
 
 ## Voraussetzungen
 
-- LXC 103 mit Docker und Docker Compose v2. Zugang wie beim Altsystem über `pct exec 103` auf dem Host.
-- Eine Domain für den Neubau (z. B. `giveaway.raumdock.org`) bei Cloudflare, Edge-Eintrag auf LXC 101 (nginx, SNI-Passthrough) auf `10.10.10.99:<CADDY_PORT>` (Default 9445; 9444 gehört dem Altsystem).
+- LXC 112 mit Docker CE und Docker Compose v2 (eingerichtet am 14.11.2026). Zugang über den Host: `ssh -i ~/.ssh/claude_deploy root@ve.raumdock.org`, dann `pct exec 112 -- bash`. Feste Adresse per DHCP-Reservierung (`/etc/dnsmasq.d/giveaway.conf` auf dem Host).
+- Eine Domain für den Neubau (z. B. `giveaway.raumdock.org`): DNS-A-Record bei Cloudflare auf die öffentliche IP des Hosts, Edge-Eintrag auf LXC 101 (`/etc/nginx/stream.d/minecraft.raumdock.org.conf`): in der SNI-Map `giveaway.raumdock.org giveaway_lxc;` und `upstream giveaway_lxc { server 10.10.10.46:443; }`, danach `nginx -t && systemctl reload nginx`. Im eigenen Container sind 80/443 frei, darum `CADDY_PORT=443`.
 - Cloudflare-API-Token mit `Zone:DNS:Edit` für die Domain (TLS per DNS-01, kein Port 80 nötig).
 - Twitch-App mit Redirect-URL `https://<DOMAIN>/api/auth/twitch/callback` und ein Bot-Konto (README „Bot einrichten“).
 - Twitch-IDs der Betreiber für `ADMIN_TWITCH_IDS`.
@@ -14,8 +14,8 @@ Runbook für Deploy, Stichtag, Rollback und Wiederherstellung (NEW_DESIGN.md 12.
 ## Erstinstallation
 
 ```sh
-cd /opt && git clone <repo> cc-giveaway-ng && cd cc-giveaway-ng
-cp .env.production.example .env            # ausfüllen: DOMAIN, PG_PASSWORD, CF_API_TOKEN, TWITCH_*, ADMIN_TWITCH_IDS
+cd /opt && git clone https://github.com/cccdemon/CC-Giveaway-NG.git cc-giveaway-ng && cd cc-giveaway-ng
+cp .env.production.example .env            # ausfüllen: DOMAIN, CADDY_PORT=443, PG_PASSWORD, CF_API_TOKEN, TWITCH_*, ADMIN_TWITCH_IDS
 mkdir -p secrets import && openssl rand -hex 32 > secrets/token.key
 chmod 700 secrets && chmod 444 secrets/token.key   # die Prozesse laufen als Nutzer node (uid 1000) und lesen den Schlüssel über ein Bind-Mount
 chown 1000:1000 import                              # Berichte der Übernahme schreibt derselbe Nutzer
@@ -30,6 +30,8 @@ docker compose logs caddy | grep remote_ip # Zugriffslog: die Adresse muss die d
 Danach einmalig mit dem Bot-Konto `https://<DOMAIN>/api/auth/twitch/bot` öffnen, die Twitch-ID des Bots in `TWITCH_BOT_USER_ID` eintragen und `docker compose up -d` erneut ausführen.
 
 Dienste: `postgres`, `redis`, `app` (API, Migrationen, Partitionen), `ingest` (Twitch-Signale), `scheduler` (Zeitgeber, Wartung, genau eine Instanz), `web` (Oberflächen), `caddy` (TLS, einziger Port), `backup` (Cron). Logs: `docker compose logs -f app` usw.
+
+Auf CT 112 ist der Stand vom 14.11.2026 schon vorbereitet (`/opt/cc-giveaway-ng`, `secrets/token.key`, `import/`, `.env` mit Domain, Port und Datenbankpasswort); es fehlen `CF_API_TOKEN`, `TWITCH_CLIENT_ID`, `TWITCH_CLIENT_SECRET`, `TWITCH_BOT_USER_ID`, `ADMIN_TWITCH_IDS`.
 
 Mehr als ein Ingest-Worker (Lasttest: ab rund 1.000 Live-Kanälen): `INGEST_WORKERS=2` in `.env`, dazu in `docker-compose.yml` den auskommentierten Dienst `ingest-1` einkommentieren (Merge-Syntax `<<: *server-env` mit eigenem `INGEST_WORKER_INDEX`).
 
