@@ -14,7 +14,7 @@ Runbook für Deploy, Stichtag, Rollback und Wiederherstellung (NEW_DESIGN.md 12.
 ## Erstinstallation
 
 ```sh
-cd /opt && git clone https://github.com/cccdemon/CC-Giveaway-NG.git cc-giveaway-ng && cd cc-giveaway-ng
+cd /opt && git clone -b main-ng https://github.com/cccdemon/CC-Giveaway-NG.git cc-giveaway-ng && cd cc-giveaway-ng   # Produktionsstand liegt auf dem Branch main-ng
 cp .env.production.example .env            # ausfüllen: DOMAIN, CADDY_PORT=443, PG_PASSWORD, CF_API_TOKEN, TWITCH_*, ADMIN_TWITCH_IDS
 mkdir -p secrets import && openssl rand -hex 32 > secrets/token.key
 chmod 700 secrets && chmod 444 secrets/token.key   # die Prozesse laufen als Nutzer node (uid 1000) und lesen den Schlüssel über ein Bind-Mount
@@ -38,7 +38,7 @@ Mehr als ein Ingest-Worker (Lasttest: ab rund 1.000 Live-Kanälen): `INGEST_WORK
 ## Update
 
 ```sh
-cd /opt/cc-giveaway-ng && git pull
+cd /opt/cc-giveaway-ng && git pull origin main-ng
 docker compose up -d --build               # Migrationen laufen beim Start jedes Prozesses
 docker compose ps
 ```
