@@ -154,6 +154,18 @@ describe('runImport', () => {
     expect((await state(t.rt, SESS1)).settings.channels).toContain(existingPid);
   });
 
+  it('--only imports the named instances and skips the rest with a reason, the team is still created', async () => {
+    const s = await setup();
+    const r = await runImport(fixture(), { pool: s.pool, rt: s.rt, accounts: s.accounts, resolver: stubResolver().resolver, dryRun: false, now: () => AT, only: ['sess_1700000003'] });
+    expect(r.team!.outcome).toBe('created');
+    expect(r.giveaways.map((g) => [g.sessionId, g.outcome])).toEqual([['sess_1700000001', 'skipped'], ['sess_1700000002', 'skipped'], ['sess_1700000003', 'created']]);
+    expect(r.giveaways[0]!.reason).toContain('--only');
+    expect(await rows(s.pool, 'SELECT legacy_session_id FROM legacy_imports')).toEqual([{ legacy_session_id: 'sess_1700000003' }]);
+    // Später ohne Filter: die beiden anderen kommen nach, die dritte ist schon übernommen.
+    const r2 = await run(s, fixture(), stubResolver().resolver);
+    expect(r2.giveaways.map((g) => g.outcome)).toEqual(['created', 'created', 'skipped']);
+  });
+
   it('a second run writes no event and reports team and giveaways as existing or skipped', async () => {
     const s = await setup();
     const { resolver } = stubResolver();

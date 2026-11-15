@@ -36,11 +36,12 @@ function giveawayLines(g: GiveawayReport): string[] {
   return out;
 }
 
-export function renderReport(file: string, dryRun: boolean, at: Date, r: RunResult): string {
+export function renderReport(file: string, dryRun: boolean, at: Date, r: RunResult, only: string[] = []): string {
   const lines: string[] = [];
   lines.push(`Übernahme des Altbestands – ${dryRun ? 'Probelauf, nichts geschrieben' : 'Lauf'}`);
   lines.push(`Datei: ${file}`);
   lines.push(`Zeit: ${at.toISOString()}`);
+  if (only.length > 0) lines.push(`Nur: ${only.join(', ')}`);
   lines.push('');
   if (r.aborted) {
     lines.push(`Abbruch (${r.aborted.code === 'checksum' ? 'Kontrollsumme' : 'Twitch'}): ${r.aborted.message}`);

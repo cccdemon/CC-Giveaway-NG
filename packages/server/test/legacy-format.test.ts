@@ -61,8 +61,8 @@ describe('Export v2 lesen', () => {
   });
 
   it('parseCliArgs reads --file, --dry-run and --report (default next to the file) and rejects a missing file', () => {
-    expect(parseCliArgs(['--file', '/import/t.json'])).toEqual({ file: '/import/t.json', dryRun: false, report: '/import/t.json.bericht.txt' });
-    expect(parseCliArgs(['--file', '/import/t.json', '--dry-run', '--report', '/tmp/b.txt'])).toEqual({ file: '/import/t.json', dryRun: true, report: '/tmp/b.txt' });
+    expect(parseCliArgs(['--file', '/import/t.json'])).toEqual({ file: '/import/t.json', dryRun: false, report: '/import/t.json.bericht.txt', only: [] });
+    expect(parseCliArgs(['--file', '/import/t.json', '--dry-run', '--report', '/tmp/b.txt', '--only', 'sess_2, sess_3'])).toEqual({ file: '/import/t.json', dryRun: true, report: '/tmp/b.txt', only: ['sess_2', 'sess_3'] });
     expect(() => parseCliArgs([])).toThrow('Die Datei fehlt');
     expect(() => parseCliArgs(['--file', 'x', '--foo'])).toThrow();
   });

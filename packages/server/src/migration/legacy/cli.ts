@@ -33,7 +33,7 @@ const log: BusLogger = {
 };
 
 async function main(): Promise<number> {
-  const { file, dryRun, report: reportPath } = parseCliArgs(process.argv.slice(2));
+  const { file, dryRun, report: reportPath, only } = parseCliArgs(process.argv.slice(2));
   let text: string;
   try {
     text = await readFile(file, 'utf8');
@@ -72,8 +72,8 @@ async function main(): Promise<number> {
     attachPlatform(rt, { admins: noAdmins });
     const helix = helixClient({ clientId: config.twitchClientId, appToken: appTokenSource({ clientId: config.twitchClientId, clientSecret: config.twitchClientSecret, now }), now });
     const at = now();
-    const result = await runImport(backup, { pool, rt, accounts, resolver: helixLoginResolver(helix), dryRun, now, log });
-    const report = renderReport(file, dryRun, at, result);
+    const result = await runImport(backup, { pool, rt, accounts, resolver: helixLoginResolver(helix), dryRun, now, log, only });
+    const report = renderReport(file, dryRun, at, result, only);
     // Erst die Konsole: ist der Zielordner nicht beschreibbar, geht der Bericht trotzdem nicht verloren.
     console.log(report);
     try {

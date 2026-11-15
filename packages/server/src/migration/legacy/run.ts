@@ -28,6 +28,8 @@ export interface RunOptions {
   dryRun: boolean;
   now?: () => Date;
   log?: BusLogger;
+  /** Nur diese Alt-Instanzen übernehmen (Test vor dem Stichtag); andere werden mit Grund übersprungen. Leer = alle. */
+  only?: string[];
 }
 
 export interface TeamReport {
@@ -285,7 +287,10 @@ export async function runImport(backup: LegacyBackup, o: RunOptions): Promise<Ru
   for (const i of backup.instances) {
     const g = await planGiveaway(i, { userOf, memberUserIds, excludedIds, teamId: teamReport.teamId, pool: o.pool, kernel });
     const already = existing.get(i.sessionId);
-    if (already !== undefined) {
+    if (o.only && o.only.length > 0 && !o.only.includes(i.sessionId)) {
+      g.report.outcome = 'skipped';
+      g.report.reason = 'Nicht in --only genannt.';
+    } else if (already !== undefined) {
       g.report.outcome = 'skipped';
       g.report.reason = `Als Giveaway ${already} schon übernommen.`;
       g.report.giveawayId = already;
